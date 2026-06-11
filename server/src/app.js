@@ -47,7 +47,23 @@ app.use(helmet({
 }));
 
 app.use(cors({
-  origin: CLIENT_URL,
+  origin: (origin, callback) => {
+    if (!origin) {
+      return callback(null, true);
+    }
+    const isAllowed = 
+      origin === CLIENT_URL ||
+      origin === 'http://localhost:5173' ||
+      origin === 'http://localhost:3000' ||
+      origin === 'https://mantaince-leads.vercel.app' ||
+      origin.endsWith('.vercel.app');
+      
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
 

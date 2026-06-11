@@ -1,0 +1,233 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum RoleName {
+  super_admin
+  vertical_admin
+  agent
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        RoleName @unique
+  permissions String[] @default([])
+  isSystem    Boolean  @default(true)
+  users       User[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model User {
+  id                   String            @id @default(uuid())
+  name                 String
+  email                String            @unique
+  passwordHash         String
+  roleId               String
+  role                 Role              @relation(fields: [roleId], references: [id])
+  isActive             Boolean           @default(true)
+  lastLoginAt          DateTime?
+  createdBy            String?
+  creator              User?             @relation("UserToUser", fields: [createdBy], references: [id])
+  createdUsers         User[]            @relation("UserToUser")
+  inviteToken          String?
+  inviteTokenExpiry    DateTime?
+  verticalAccess       VerticalAccess[]
+  assignedSubVerticals UserSubVertical[]
+  leads                Lead[]            @relation("LeadsAssigned")
+  uploadedLeads        Lead[]            @relation("LeadsUploaded")
+  deletedLeads         Lead[]            @relation("LeadsDeleted")
+  csvUploadLogs        CsvUploadLog[]
+  auditLogs            AuditLog[]
+  sessions             Session[]
+  userAssignments      UserAssignment[]  @relation("UserAssignments")
+  createdAssignments   UserAssignment[]  @relation("AssignmentsCreated")
+  verticalsCreated     Vertical[]
+  subVerticalsCreated  SubVertical[]
+  fieldConfigsCreated  FieldConfig[]
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+}
+
+model VerticalAccess {
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verticalId String
+  vertical   Vertical @relation(fields: [verticalId], references: [id], onDelete: Cascade)
+
+  @@id([userId, verticalId])
+}
+
+model UserSubVertical {
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subVerticalId String
+  subVertical   SubVertical @relation(fields: [subVerticalId], references: [id], onDelete: Cascade)
+
+  @@id([userId, subVerticalId])
+}
+
+model Vertical {
+  id             String           @id @default(uuid())
+  name           String
+  slug           String           @unique
+  description    String?
+  color          String           @default("#185FA5")
+  icon           String           @default("Layers")
+  isActive       Boolean          @default(true)
+  displayOrder   Int              @default(0)
+  createdBy      String?
+  creator        User?            @relation(fields: [createdBy], references: [id])
+  subVerticals   SubVertical[]
+  fieldConfigs   FieldConfig[]
+  leads          Lead[]
+  csvUploadLogs  CsvUploadLog[]
+  verticalAccess VerticalAccess[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+}
+
+model SubVertical {
+  id             String            @id @default(uuid())
+  name           String
+  slug           String
+  verticalId     String
+  vertical       Vertical          @relation(fields: [verticalId], references: [id], onDelete: Cascade)
+  isActive       Boolean           @default(true)
+  displayOrder   Int               @default(0)
+  createdBy      String?
+  creator        User?             @relation(fields: [createdBy], references: [id])
+  leads          Lead[]
+  userAccess     UserSubVertical[]
+  userAssignments UserAssignment[]
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@unique([verticalId, slug])
+}
+
+model FieldConfig {
+  id                String   @id @default(uuid())
+  verticalId        String
+  vertical          Vertical @relation(fields: [verticalId], references: [id], onDelete: Cascade)
+  fieldKey          String
+  label             String
+  fieldType         String
+  options           String[] @default([])
+  placeholder       String   @default("")
+  defaultValue      Json?
+  isRequired        Boolean  @default(false)
+  isVisible         Boolean  @default(true)
+  isTableColumn     Boolean  @default(true)
+  isCsvMapped       Boolean  @default(true)
+  csvHeader         String   @default("")
+  validationRegex   String   @default("")
+  validationMessage String   @default("")
+  displayOrder      Int      @default(0)
+  createdBy         String?
+  creator           User?    @relation(fields: [createdBy], references: [id])
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([verticalId, fieldKey])
+}
+
+model Lead {
+  id            String       @id @default(uuid())
+  name          String       @default("")
+  phone         String       @default("")
+  businessName  String       @default("")
+  verticalId    String
+  vertical      Vertical     @relation(fields: [verticalId], references: [id], onDelete: Cascade)
+  subVerticalId String?
+  subVertical   SubVertical? @relation(fields: [subVerticalId], references: [id])
+  assignedTo    String?
+  assignedUser  User?        @relation("LeadsAssigned", fields: [assignedTo], references: [id])
+  uploadedBy    String
+  uploader      User         @relation("LeadsUploaded", fields: [uploadedBy], references: [id])
+  data          Json         @default("{}")
+  status        String       @default("new")
+  source        String       @default("manual")
+  csvBatchId    String?
+  csvUploadLog  CsvUploadLog? @relation(fields: [csvBatchId], references: [id])
+  isDeleted     Boolean      @default(false)
+  deletedAt     DateTime?
+  deletedBy     String?
+  deletedByUser User?        @relation("LeadsDeleted", fields: [deletedBy], references: [id])
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([subVerticalId, isDeleted, createdAt(sort: Desc)])
+  @@index([verticalId, subVerticalId, isDeleted, createdAt(sort: Desc)])
+}
+
+model CsvUploadLog {
+  id                    String    @id @default(uuid())
+  uploadedBy            String
+  uploader              User      @relation(fields: [uploadedBy], references: [id], onDelete: Cascade)
+  verticalId            String
+  vertical              Vertical  @relation(fields: [verticalId], references: [id], onDelete: Cascade)
+  originalFileName      String
+  totalRows             Int       @default(0)
+  successCount          Int       @default(0)
+  failedCount           Int       @default(0)
+  duplicateCount        Int       @default(0)
+  errors                Json      @default("[]")
+  status                String    @default("queued")
+  processingStartedAt   DateTime?
+  processingFinishedAt  DateTime?
+  failedRowsDownloadUrl String    @default("")
+  leads                 Lead[]
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+model AuditLog {
+  id               String   @id @default(uuid())
+  actorId          String
+  actor            User     @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  actorEmail       String
+  action           String
+  targetCollection String
+  targetId         String
+  before           Json?
+  after            Json?
+  ip               String   @default("")
+  userAgent        String   @default("")
+  metadata         Json     @default("{}")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String
+  expiresAt DateTime
+  ip        String   @default("")
+  userAgent String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model UserAssignment {
+  id            String      @id @default(uuid())
+  userId        String
+  user          User        @relation("UserAssignments", fields: [userId], references: [id], onDelete: Cascade)
+  subVerticalId String
+  subVertical   SubVertical @relation(fields: [subVerticalId], references: [id], onDelete: Cascade)
+  assignedBy    String
+  assigner      User        @relation("AssignmentsCreated", fields: [assignedBy], references: [id])
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([userId, subVerticalId])
+}

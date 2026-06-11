@@ -1,0 +1,91 @@
+import { create } from 'zustand';
+import axios, { injectAuthStore } from '../api/axios.js';
+
+// Get initial user from localStorage
+const getInitialUser = () => {
+  try {
+    const saved = localStorage.getItem('user');
+    return saved ? JSON.parse(saved) : null;
+  } catch {
+    return null;
+  }
+};
+
+export const useAuthStore = create((set, get) => ({
+  user: getInitialUser(),
+  accessToken: null,
+  isAuthenticated: !!getInitialUser(),
+  loading: false,
+
+  login: async (email, password) => {
+    set({ loading: true });
+    try {
+      const response = await axios.post('/api/v1/auth/login', { email, password });
+      const { accessToken, user } = response.data.data;
+
+      localStorage.setItem('user', JSON.stringify(user));
+      set({
+        user,
+        accessToken,
+        isAuthenticated: true,
+        loading: false
+      });
+      return user;
+    } catch (error) {
+      set({ loading: false });
+      throw new Error(error.response?.data?.error || 'Login failed. Please check your credentials.');
+    }
+  },
+
+  logout: async () => {
+    try {
+      await axios.post('/api/v1/auth/logout');
+    } catch {
+      // Ignore network errors on logout
+    } finally {
+      localStorage.removeItem('user');
+      set({
+        user: null,
+        accessToken: null,
+        isAuthenticated: false
+      });
+    }
+  },
+
+  refreshToken: async () => {
+    try {
+      const response = await axios.post('/api/v1/auth/refresh');
+      const { accessToken, user } = response.data.data;
+      localStorage.setItem('user', JSON.stringify(user));
+      set({
+        user,
+        accessToken,
+        isAuthenticated: true
+      });
+      return accessToken;
+    } catch (error) {
+      localStorage.removeItem('user');
+      set({
+        user: null,
+        accessToken: null,
+        isAuthenticated: false
+      });
+      throw error;
+    }
+  },
+
+  setAccessToken: (token) => set({ accessToken: token }),
+  setUser: (user) => {
+    if (user) {
+      localStorage.setItem('user', JSON.stringify(user));
+      set({ user, isAuthenticated: true });
+    } else {
+      localStorage.removeItem('user');
+      set({ user: null, isAuthenticated: false });
+    }
+  }
+}));
+
+injectAuthStore(useAuthStore);
+
+export default useAuthStore;

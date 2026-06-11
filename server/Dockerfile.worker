@@ -1,0 +1,28 @@
+# ── Build Stage ─────────────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+COPY package*.json ./
+COPY prisma/schema.prisma ./prisma/
+
+RUN npm ci
+
+COPY . .
+RUN npx prisma generate
+
+# ── Runner Stage ────────────────────────────────────────────────────────────
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+RUN addgroup -S admateine && adduser -S admateine -G admateine
+
+COPY --from=builder --chown=admateine:admateine /app/node_modules ./node_modules
+COPY --from=builder --chown=admateine:admateine /app/src          ./src
+COPY --from=builder --chown=admateine:admateine /app/prisma       ./prisma
+COPY --from=builder --chown=admateine:admateine /app/package*.json ./
+
+USER admateine
+
+ENV NODE_ENV=production
+
+CMD ["node", "src/jobs/worker.js"]

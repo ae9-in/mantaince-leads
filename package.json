@@ -1,0 +1,21 @@
+{
+  "name": "leads-maintenance-root",
+  "version": "1.0.0",
+  "description": "Root runner for Leads Base Monorepo",
+  "type": "module",
+  "scripts": {
+    "install:all": "npm install && npm install --prefix server && npm install --prefix client",
+    "start": "npm run dev",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "nodemon --watch server/src --ext js,mjs,cjs,json server/src/app.js",
+    "dev:worker": "nodemon --watch server/src --ext js,mjs,cjs,json server/src/jobs/worker.js",
+    "dev:client": "npm run dev --prefix client",
+    "seed": "node server/src/scripts/seed.js",
+    "build": "npm run build --prefix client",
+    "test:integration": "node server/src/testAllBackend.js"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.1.0"
+  }
+}

@@ -1,0 +1,1285 @@
+/* eslint-disable i18next/no-literal-string */
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  useReactTable,
+  getCoreRowModel,
+  flexRender,
+} from '@tanstack/react-table';
+import {
+  AlertCircle,
+  ArrowUpDown,
+  CheckSquare,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Edit,
+  FileSpreadsheet,
+  Filter,
+  Plus,
+  Search,
+  Trash2,
+  Upload,
+  CheckCircle2,
+  X,
+} from 'lucide-react';
+import axios from '../api/axios.js';
+import ConfirmDialog from '../components/ConfirmDialog.jsx';
+import StatusBadge from '../components/StatusBadge.jsx';
+import Loader from '../components/Loader.jsx';
+import { useAuthStore } from '../store/authStore.js';
+import { useUiStore } from '../store/uiStore.js';
+import toast from 'react-hot-toast';
+
+const STATUS_OPTIONS = [
+  { value: 'new', label: 'New' },
+  { value: 'contacted', label: 'Contacted' },
+  { value: 'qualified', label: 'Qualified' },
+  { value: 'visit_scheduled', label: 'Meeting Scheduled' },
+  { value: 'visit_completed', label: 'Meeting Completed' },
+  { value: 'negotiation', label: 'Negotiation' },
+  { value: 'converted', label: 'Converted' },
+  { value: 'lost', label: 'Lost' },
+  { value: 'invalid', label: 'Invalid' },
+];
+
+const BASE_DYNAMIC_FIELDS = [
+  { key: 'nameBusiness', label: 'Name Business', type: 'text', defaultValue: '' },
+  { key: 'date', label: 'Date', type: 'date', defaultValue: '' },
+  { key: 'employeeSpoken', label: 'Employee Spoken', type: 'text', defaultValue: '' },
+  { key: 'convertedStatus', label: 'Converted Status', type: 'text', defaultValue: '' },
+  { key: 'deliveredLocation', label: 'Delivered Location', type: 'text', defaultValue: '' },
+  { key: 'deliveredLink', label: 'Delivered Link', type: 'url', defaultValue: '' },
+];
+
+const BASE_DYNAMIC_FIELD_KEYS = new Set(BASE_DYNAMIC_FIELDS.map((field) => field.key));
+
+const getLeadData = (lead, key, fallback = '') => {
+  if (key === '__proto__' || key === 'constructor' || key === 'prototype') return fallback;
+  if (typeof key !== 'string') return fallback;
+  const data = lead?.data || {};
+  if (Object.prototype.hasOwnProperty.call(data, key)) {
+    const value = data[key];
+    return value === undefined || value === null ? fallback : value;
+  }
+  return fallback;
+};
+
+const getDynamicValue = (obj, key, fallback = '') => {
+  if (key === '__proto__' || key === 'constructor' || key === 'prototype') return fallback;
+  if (typeof key !== 'string') return fallback;
+  const target = obj || {};
+  if (Object.prototype.hasOwnProperty.call(target, key)) {
+    const value = target[key];
+    return value === undefined || value === null ? fallback : value;
+  }
+  return fallback;
+};
+
+const formatDate = (value) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString();
+};
+
+const formatDynamicValue = (type, value) => {
+  if (value === undefined || value === null || value === '') return '-';
+  if (type === 'date') return formatDate(value);
+  return String(value);
+};
+
+const createBaseDynamicDefaults = () =>
+  BASE_DYNAMIC_FIELDS.reduce((acc, field) => {
+    if (field.key !== '__proto__' && field.key !== 'constructor' && field.key !== 'prototype' && typeof field.key === 'string') {
+      Object.defineProperty(acc, field.key, {
+        value: field.defaultValue,
+        writable: true,
+        enumerable: true,
+        configurable: true
+      });
+    }
+    return acc;
+  }, {});
+
+export const LeadsPage = () => {
+  const { activeVertical, activeSubVertical, leadsRefreshTrigger } = useUiStore();
+  const { user } = useAuthStore();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const page = parseInt(searchParams.get('page') || '1', 10);
+  const limit = parseInt(searchParams.get('limit') || '15', 10);
+  const search = searchParams.get('q') || '';
+  const statusFilter = searchParams.get('status') || '';
+  const subVerticalFilter = searchParams.get('subVerticalId') || '';
+  const agentFilter = searchParams.get('assignedTo') || '';
+  const sortBy = searchParams.get('sortBy') || 'createdAt';
+  const sortDir = searchParams.get('sortDir') || 'desc';
+  const csvBatchId = searchParams.get('csvBatchId') || '';
+
+  const [leads, setLeads] = useState([]);
+  const [totalLeads, setTotalLeads] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [configs, setConfigs] = useState([]);
+  const [subVerticals, setSubVerticals] = useState([]);
+  const [agents, setAgents] = useState([]);
+  const [rowSelection, setRowSelection] = useState({});
+  const [searchInput, setSearchInput] = useState(search);
+  const [showFilters, setShowFilters] = useState(false);
+  const [columnVisibility, setColumnVisibility] = useState({});
+
+  const [bulkAssignModal, setBulkAssignModal] = useState(false);
+  const [bulkStatusModal, setBulkStatusModal] = useState(false);
+  const [bulkDeleteDialog, setBulkDeleteDialog] = useState(false);
+  const [bulkAssignTarget, setBulkAssignTarget] = useState('');
+  const [bulkStatusTarget, setBulkStatusTarget] = useState('new');
+
+  const [leadModalOpen, setLeadModalOpen] = useState(false);
+  const [selectedLead, setSelectedLead] = useState(null);
+  const [leadFormName, setLeadFormName] = useState('');
+  const [leadFormPhone, setLeadFormPhone] = useState('');
+  const [leadFormBusiness, setLeadFormBusiness] = useState('');
+  const [leadFormDynamic, setLeadFormDynamic] = useState(createBaseDynamicDefaults());
+  const [formErrors, setFormErrors] = useState([]);
+
+  // CSV Import Modal states
+  const [csvImportModalOpen, setCsvImportModalOpen] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [assignTarget, setAssignTarget] = useState('');
+  const [uploadStatus, setUploadStatus] = useState('idle'); // 'idle' | 'uploading' | 'processing' | 'done' | 'failed'
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadResult, setUploadResult] = useState(null); // { successCount, failedCount, duplicateCount, errors }
+  const [leadFormSubVerticalId, setLeadFormSubVerticalId] = useState('');
+
+  const isAdmin = user?.role === 'super_admin' || user?.role === 'vertical_admin';
+
+  const updateQueryParam = useCallback((key, value, options = { resetPage: true }) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (value) {
+      nextParams.set(key, value);
+    } else {
+      nextParams.delete(key);
+    }
+    if (options.resetPage) nextParams.set('page', '1');
+    setSearchParams(nextParams);
+  }, [searchParams, setSearchParams]);
+
+  const customConfigs = useMemo(
+    () => configs.filter((config) => !BASE_DYNAMIC_FIELD_KEYS.has(config.fieldKey)),
+    [configs]
+  );
+
+  const buildInitialDynamic = useCallback((lead = null) => {
+    const defaults = createBaseDynamicDefaults();
+    customConfigs.forEach((config) => {
+      const key = config.fieldKey;
+      if (key !== '__proto__' && key !== 'constructor' && key !== 'prototype' && typeof key === 'string') {
+        Object.defineProperty(defaults, key, {
+          value: config.defaultValue ?? '',
+          writable: true,
+          enumerable: true,
+          configurable: true
+        });
+      }
+    });
+    return {
+      ...defaults,
+      ...(lead?.data || {}),
+    };
+  }, [customConfigs]);
+
+  const fetchLeads = useCallback(async () => {
+    if (!activeVertical) return;
+    setLoading(true);
+    try {
+      const qParams = new URLSearchParams({
+        verticalId: activeVertical._id,
+        page: String(page),
+        limit: String(limit),
+        status: statusFilter,
+        subVerticalId: subVerticalFilter,
+        assignedTo: agentFilter,
+        search,
+        sortBy,
+        sortDir,
+      });
+      if (csvBatchId) {
+        qParams.set('csvBatchId', csvBatchId);
+      }
+
+      const response = await axios.get(`/api/v1/leads?${qParams.toString()}`);
+      setLeads(response.data.data || []);
+      setTotalLeads(response.data.meta?.total || 0);
+      setTotalPages(response.data.meta?.totalPages || 1);
+    } catch (err) {
+      console.error('Error fetching leads:', err);
+      toast.error(err.response?.data?.error || 'Failed to load leads list');
+    } finally {
+      setLoading(false);
+    }
+  }, [activeVertical, agentFilter, limit, page, search, sortBy, sortDir, statusFilter, subVerticalFilter, csvBatchId]);
+
+  useEffect(() => {
+    if (!activeVertical) return;
+
+    const fetchMetadata = async () => {
+      try {
+        const [configsRes, subsRes] = await Promise.all([
+          axios.get(`/api/v1/configs/verticals/${activeVertical._id}/fields`),
+          axios.get(`/api/v1/verticals/${activeVertical._id}/sub-verticals`),
+        ]);
+
+        const nextConfigs = configsRes.data.data || [];
+        setConfigs(nextConfigs);
+        setSubVerticals((subsRes.data.data || []).filter((sub) => sub.isActive));
+
+        const savedVisibility = localStorage.getItem(`cols_visible_${activeVertical._id}`);
+        if (savedVisibility) {
+          setColumnVisibility(JSON.parse(savedVisibility));
+        } else {
+          const nextVisibility = {};
+          nextConfigs.forEach((config) => {
+            const key = config.fieldKey;
+            if (key !== '__proto__' && key !== 'constructor' && key !== 'prototype') {
+              nextVisibility[key] = config.isTableColumn;
+            }
+          });
+          setColumnVisibility(nextVisibility);
+        }
+
+        if (isAdmin) {
+          const usersRes = await axios.get('/api/v1/users');
+          setAgents((usersRes.data.data || []).filter((member) => member.isActive));
+        }
+      } catch (err) {
+        console.error('Error fetching layout metadata:', err);
+      }
+    };
+
+    fetchMetadata();
+  }, [activeVertical, isAdmin]);
+
+  useEffect(() => {
+    fetchLeads();
+    setRowSelection({});
+  }, [fetchLeads, leadsRefreshTrigger]);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (searchInput !== search) {
+        updateQueryParam('q', searchInput);
+      }
+    }, 400);
+    return () => clearTimeout(handler);
+  }, [search, searchInput, updateQueryParam]);
+
+  useEffect(() => {
+    if (activeVertical) {
+      localStorage.setItem(`cols_visible_${activeVertical._id}`, JSON.stringify(columnVisibility));
+    }
+  }, [activeVertical, columnVisibility]);
+
+  const handleSort = (field) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (sortBy === field) {
+      nextParams.set('sortDir', sortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      nextParams.set('sortBy', field);
+      nextParams.set('sortDir', 'desc');
+    }
+    setSearchParams(nextParams);
+  };
+
+  const handleDynamicChange = (key, value) => {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype' || typeof key !== 'string') return;
+    setLeadFormDynamic((prev) => {
+      const next = { ...prev };
+      Object.defineProperty(next, key, {
+        value: value,
+        writable: true,
+        enumerable: true,
+        configurable: true
+      });
+      return next;
+    });
+  };
+
+  const handleOpenAdd = () => {
+    setSelectedLead(null);
+    setFormErrors([]);
+    setLeadFormName('');
+    setLeadFormPhone('');
+    setLeadFormBusiness('');
+    setLeadFormSubVerticalId('');
+    setLeadFormDynamic(buildInitialDynamic());
+    setLeadModalOpen(true);
+  };
+
+  const handleOpenEdit = (lead) => {
+    setSelectedLead(lead);
+    setFormErrors([]);
+    setLeadFormName(lead.name || '');
+    setLeadFormPhone(lead.phone || '');
+    setLeadFormBusiness(lead.businessName || '');
+    setLeadFormSubVerticalId(lead.subVerticalId?._id || lead.subVerticalId || '');
+    setLeadFormDynamic(buildInitialDynamic(lead));
+    setLeadModalOpen(true);
+  };
+
+  const handleLeadSubmit = async (event) => {
+    event.preventDefault();
+    setFormErrors([]);
+
+    const payload = {
+      name: leadFormName,
+      phone: leadFormPhone,
+      businessName: leadFormBusiness,
+      verticalId: activeVertical._id,
+      subVerticalId: subVerticalFilter || leadFormSubVerticalId || null,
+      data: leadFormDynamic,
+    };
+
+    if (selectedLead) {
+      payload.status = selectedLead.status;
+      payload.subVerticalId = selectedLead.subVerticalId?._id || selectedLead.subVerticalId || leadFormSubVerticalId || null;
+      payload.assignedTo = selectedLead.assignedTo?._id || selectedLead.assignedTo || null;
+    }
+
+    try {
+      if (selectedLead) {
+        await axios.patch(`/api/v1/leads/${selectedLead._id}`, payload);
+        toast.success('Lead updated successfully.');
+      } else {
+        await axios.post('/api/v1/leads', payload);
+        toast.success('New lead created.');
+      }
+      setLeadModalOpen(false);
+      fetchLeads();
+    } catch (err) {
+      setFormErrors([err.response?.data?.error || 'Save failed.']);
+    }
+  };
+
+  const selectedRowIds = Object.keys(rowSelection)
+    .map((index) => {
+      const idx = parseInt(index, 10);
+      if (idx >= 0 && idx < leads.length) {
+        return leads[idx]?._id;
+      }
+      return null;
+    })
+    .filter(Boolean);
+
+  const handleSingleDelete = (leadId) => {
+    if (!window.confirm('Are you sure you want to delete this lead?')) return;
+    axios.delete(`/api/v1/leads/${leadId}`)
+      .then(() => {
+        toast.success('Lead deleted successfully');
+        fetchLeads();
+      })
+      .catch((err) => {
+        toast.error(err.response?.data?.error || 'Failed to delete lead');
+      });
+  };
+
+  const handleBulkDelete = async () => {
+    try {
+      await Promise.all(selectedRowIds.map((id) => axios.delete(`/api/v1/leads/${id}`)));
+      toast.success(`Successfully deleted ${selectedRowIds.length} leads.`);
+      setBulkDeleteDialog(false);
+      setRowSelection({});
+      fetchLeads();
+    } catch {
+      toast.error('Bulk deletion failed partially.');
+    }
+  };
+
+  const handleBulkAssign = async () => {
+    try {
+      await Promise.all(selectedRowIds.map((id) => axios.patch(`/api/v1/leads/${id}/assign`, { userId: bulkAssignTarget || null })));
+      toast.success(`Successfully assigned ${selectedRowIds.length} leads.`);
+      setBulkAssignModal(false);
+      setRowSelection({});
+      fetchLeads();
+    } catch {
+      toast.error('Bulk assignment failed.');
+    }
+  };
+
+  const handleBulkStatusChange = async () => {
+    try {
+      await Promise.all(selectedRowIds.map((id) => axios.patch(`/api/v1/leads/${id}/status`, { status: bulkStatusTarget })));
+      toast.success(`Successfully updated ${selectedRowIds.length} leads status.`);
+      setBulkStatusModal(false);
+      setRowSelection({});
+      fetchLeads();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Bulk status update failed.');
+    }
+  };
+
+  const handleCsvExport = async () => {
+    if (!activeVertical) return;
+    try {
+      const qParams = new URLSearchParams({
+        verticalId: activeVertical._id,
+        status: statusFilter,
+        subVerticalId: subVerticalFilter,
+        assignedTo: agentFilter,
+        search,
+      });
+
+      const response = await axios.get(`/api/v1/leads/export/csv?${qParams.toString()}`);
+      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `leads-export-${activeVertical.slug}-${Date.now()}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch {
+      toast.error('Failed to export CSV database.');
+    }
+  };
+
+  // CSV Import logic
+  const handleDownloadTemplate = async () => {
+    if (!activeVertical) return;
+    try {
+      const response = await axios.get(`/api/v1/leads/csv/template/${activeVertical._id}`);
+      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `leads-template-${activeVertical.slug}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch {
+      toast.error('Failed to download CSV template');
+    }
+  };
+
+  const handleCsvUploadSubmit = async (e) => {
+    e.preventDefault();
+    if (!selectedFile) {
+      toast.error('Please select a CSV file first');
+      return;
+    }
+    
+    setUploadStatus('uploading');
+    setUploadProgress(10);
+
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    formData.append('verticalId', activeVertical._id);
+    formData.append('subVerticalId', ''); // Always upload at the vertical level
+    if (assignTarget) {
+      formData.append('assignedTo', assignTarget);
+    }
+
+    try {
+      const res = await axios.post('/api/v1/leads/csv/upload', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      const { batchId } = res.data.data;
+      setUploadStatus('processing');
+      setUploadProgress(40);
+
+      // Start polling status of processing
+      let intervalId = setInterval(async () => {
+        try {
+          const logRes = await axios.get(`/api/v1/leads/csv/logs/${batchId}`);
+          const log = logRes.data.data;
+          
+          if (log.status === 'done') {
+            clearInterval(intervalId);
+            setUploadProgress(100);
+            setUploadStatus('done');
+            setUploadResult({
+              batchId: log.id,
+              successCount: log.success_count || 0,
+              failedCount: log.failed_count || 0,
+              duplicateCount: log.duplicate_count || 0,
+              errors: log.errors || [],
+            });
+            toast.success('CSV import completed.');
+            fetchLeads();
+          } else if (log.status === 'failed') {
+            clearInterval(intervalId);
+            setUploadStatus('failed');
+            setUploadResult({
+              batchId: log.id,
+              successCount: log.success_count || 0,
+              failedCount: log.failed_count || 0,
+              duplicateCount: log.duplicate_count || 0,
+              errors: log.errors || [{ row: 0, reason: 'Log entry marked failed' }],
+            });
+            toast.error('CSV import failed.');
+          } else {
+            setUploadProgress(prev => Math.min(prev + 10, 95));
+          }
+        } catch (pollErr) {
+          clearInterval(intervalId);
+          setUploadStatus('failed');
+          toast.error('Failed to retrieve processing status.');
+        }
+      }, 2000);
+
+    } catch (err) {
+      setUploadStatus('failed');
+      toast.error(err.response?.data?.error || 'Failed to upload CSV file');
+    }
+  };
+
+  const handleCloseImportModal = () => {
+    setCsvImportModalOpen(false);
+    setSelectedFile(null);
+    setAssignTarget('');
+    setUploadStatus('idle');
+    setUploadProgress(0);
+    setUploadResult(null);
+  };
+
+  const columns = useMemo(() => {
+    const fixedColumns = [
+      {
+        id: 'select',
+        header: ({ table }) => (
+          <input
+            type="checkbox"
+            className="w-4 h-4 rounded accent-[--accent]"
+            checked={table.getIsAllRowsSelected()}
+            onChange={table.getToggleAllRowsSelectedHandler()}
+          />
+        ),
+        cell: ({ row }) => (
+          <input
+            type="checkbox"
+            className="w-4 h-4 rounded accent-[--accent]"
+            checked={row.getIsSelected()}
+            onChange={row.getToggleSelectedHandler()}
+          />
+        ),
+      },
+      {
+        accessorKey: 'name',
+        header: 'Name',
+        cell: ({ row }) => (
+          <button
+            type="button"
+            className="font-bold text-[--accent] hover:underline text-left text-xs"
+            onClick={() => navigate(`/leads/${row.original._id}`)}
+          >
+            {row.original.name}
+          </button>
+        ),
+      },
+      { accessorKey: 'phone', header: 'Number' },
+      { accessorKey: 'businessName', header: 'Business' },
+      {
+        id: 'nameBusiness',
+        header: 'Name Business',
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'nameBusiness')),
+      },
+      {
+        id: 'date',
+        header: 'Date',
+        cell: ({ row }) => formatDynamicValue('date', getLeadData(row.original, 'date')),
+      },
+      {
+        id: 'employeeSpoken',
+        header: 'Employee Spoken',
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'employeeSpoken')),
+      },
+      {
+        id: 'convertedStatus',
+        header: 'Converted Status',
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'convertedStatus')),
+      },
+      {
+        id: 'deliveredLocation',
+        header: 'Delivered Location',
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'deliveredLocation')),
+      },
+      {
+        id: 'deliveredLink',
+        header: 'Delivered Link',
+        cell: ({ row }) => {
+          const value = getLeadData(row.original, 'deliveredLink');
+          if (!value) return '-';
+          return (
+            <a href={value} target="_blank" rel="noreferrer" className="text-[--accent] hover:underline">
+              Open
+            </a>
+          );
+        },
+      },
+      {
+        accessorKey: 'status',
+        header: 'Lead Status',
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      },
+      {
+        id: 'actions',
+        header: 'Actions',
+        cell: ({ row }) => (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleOpenEdit(row.original)}
+              className="p-2 border border-stone-200 rounded-lg hover:bg-stone-50"
+            >
+              <Edit size={14} className="text-[--text-secondary]" />
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSingleDelete(row.original._id)}
+              className="p-2 border border-stone-200 rounded-lg hover:bg-stone-50 text-red-500"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ),
+      },
+    ];
+
+    const customColumns = customConfigs
+      .filter((config) => {
+        const key = config.fieldKey;
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') return false;
+        return columnVisibility[key] ?? config.isTableColumn;
+      })
+      .map((config) => ({
+        id: config.fieldKey,
+        header: config.label,
+        cell: ({ row }) => formatDynamicValue(config.fieldType, getLeadData(row.original, config.fieldKey)),
+      }));
+
+    return [
+      ...fixedColumns.slice(0, fixedColumns.length - 2),
+      ...customColumns,
+      ...fixedColumns.slice(fixedColumns.length - 2),
+    ];
+  }, [columnVisibility, customConfigs, navigate]);
+
+  const table = useReactTable({
+    data: leads,
+    columns,
+    state: {
+      rowSelection,
+    },
+    enableRowSelection: true,
+    onRowSelectionChange: setRowSelection,
+    getCoreRowModel: getCoreRowModel(),
+  });
+
+  // If no vertical is active, show landing dashboard
+  if (!activeVertical) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-8 space-y-6">
+        <div className="relative w-24 h-24 flex items-center justify-center bg-[--accent-light] border border-[--accent-border] rounded-2xl shadow-md">
+          <FileSpreadsheet className="text-[--accent]" size={44} />
+        </div>
+        <div className="max-w-md space-y-2">
+          <h2 className="text-2xl font-black text-[--text-primary] uppercase tracking-wider">Leads Workspace</h2>
+          <p className="text-sm text-[--text-secondary] leading-relaxed">
+            Welcome to the LeadsBase portal. Please select a vertical from the sidebar to manage leads.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const activeSubVerticalName = activeSubVertical?.name || subVerticals.find(s => s._id === subVerticalFilter)?.name;
+
+  return (
+    <div className="space-y-6">
+      {/* Workspace Header */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-[--text-primary]">
+            {activeSubVerticalName ? `${activeSubVerticalName} Workspace` : `${activeVertical.name} Workspace`}
+          </h1>
+          <p className="text-sm text-[--text-secondary] mt-1">
+            {activeSubVerticalName 
+              ? `Manage leads for ${activeSubVerticalName} under ${activeVertical?.name || 'Workspace'}.`
+              : `Manage leads for ${activeVertical.name}.`}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-2 animate-none">
+          <button
+            type="button"
+            onClick={() => setShowFilters((prev) => !prev)}
+            className="inline-flex items-center gap-2 px-4 py-2 border border-[--border-strong] rounded-lg hover:bg-stone-50 text-sm text-[--text-secondary] bg-white font-medium shadow-sm"
+          >
+            <Filter size={16} />
+            <span>Filters</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleCsvExport}
+            className="inline-flex items-center gap-2 px-4 py-2 border border-[--border-strong] rounded-lg hover:bg-stone-50 text-sm text-[--text-secondary] bg-white font-medium shadow-sm"
+          >
+            <Download size={16} />
+            <span>Export</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setCsvImportModalOpen(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 border border-[--border-strong] rounded-lg hover:bg-stone-50 text-sm text-[--text-secondary] bg-white font-medium shadow-sm"
+          >
+            <Upload size={16} />
+            <span>Import CSV</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenAdd}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-[--accent] text-white rounded-lg font-bold text-sm hover:bg-[--accent-hover] shadow-sm transition-all"
+          >
+            <Plus size={16} />
+            <span>Add Lead</span>
+          </button>
+        </div>
+      </div>
+
+      {csvBatchId && (
+        <div className="flex items-center justify-between p-3 bg-[--accent-light] border border-[--accent-border] rounded-lg text-sm text-[--accent] mb-4">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={16} />
+            <span>Viewing leads imported in CSV Batch: <strong>{csvBatchId}</strong></span>
+          </div>
+          <button
+            type="button"
+            onClick={() => updateQueryParam('csvBatchId', null)}
+            className="text-xs uppercase font-bold text-[--text-secondary] hover:text-[#ff4d4d] transition-all bg-transparent border-0 cursor-pointer p-0"
+          >
+            Clear Filter
+          </button>
+        </div>
+      )}
+
+      {showFilters && (
+        <div className="glass-panel p-4 bg-white border border-[--border]">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <FilterInput label="Search Leads">
+              <div className="relative">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[--text-muted]" />
+                <input
+                  value={searchInput}
+                  onChange={(event) => setSearchInput(event.target.value)}
+                  className="w-full pl-10"
+                  placeholder="Search by name or number"
+                />
+              </div>
+            </FilterInput>
+
+            <FilterInput label="Lead Status">
+              <select value={statusFilter} onChange={(event) => updateQueryParam('status', event.target.value)} className="w-full">
+                <option value="">All Statuses</option>
+                {STATUS_OPTIONS.map((status) => (
+                  <option key={status.value} value={status.value}>{status.label}</option>
+                ))}
+              </select>
+            </FilterInput>
+
+            <FilterInput label="Assigned Agent">
+              <select value={agentFilter} onChange={(event) => updateQueryParam('assignedTo', event.target.value)} className="w-full">
+                <option value="">All Agents</option>
+                {agents.map((agent) => (
+                  <option key={agent._id} value={agent._id}>{agent.name}</option>
+                ))}
+              </select>
+            </FilterInput>
+          </div>
+        </div>
+      )}
+
+      <div className="glass-panel overflow-hidden bg-white border border-[--border] shadow-sm">
+        {loading ? (
+          <div className="py-20 flex justify-center"><Loader /></div>
+        ) : leads.length === 0 ? (
+          <div className="py-16 text-center text-[--text-secondary]">
+            <FileSpreadsheet className="mx-auto text-[--text-muted]/30 mb-3" size={48} />
+            <p className="text-sm font-semibold">No lead records match your current filters.</p>
+            <p className="text-xs text-[--text-muted] mt-1">Add a lead to start filling this list.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-[--border-strong] bg-stone-50">
+                  {table.getHeaderGroups().map((group) => (
+                    <React.Fragment key={group.id}>
+                      {group.headers.map((header) => {
+                        const isSortable = ['name', 'phone', 'status'].includes(header.column.id);
+                        return (
+                          <th key={header.id} className="px-4 py-3 text-xs uppercase font-bold text-[--text-secondary] tracking-wider whitespace-nowrap">
+                            {header.isPlaceholder ? null : (
+                              <div
+                                className={`flex items-center gap-1 ${isSortable ? 'cursor-pointer select-none hover:text-[--text-primary]' : ''}`}
+                                onClick={isSortable ? () => handleSort(header.column.id) : undefined}
+                              >
+                                {flexRender(header.column.columnDef.header, header.getContext())}
+                                {isSortable && <ArrowUpDown size={10} />}
+                              </div>
+                            )}
+                          </th>
+                        );
+                      })}
+                    </React.Fragment>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {table.getRowModel().rows.map((row) => (
+                  <tr key={row.id} className="border-b border-[--border] hover:bg-stone-50/50">
+                    {row.getVisibleCells().map((cell) => (
+                      <td key={cell.id} className="px-4 py-3 text-[--text-primary] whitespace-nowrap text-xs">
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {selectedRowIds.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3 bg-[--accent] text-white font-bold text-xs">
+            <div className="flex items-center gap-2">
+              <CheckSquare size={16} />
+              <span>{selectedRowIds.length} lead rows checked</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => setBulkStatusModal(true)} className="px-3 py-1.5 bg-black/10 hover:bg-black/20 rounded text-xs uppercase">Change Status</button>
+              <button onClick={() => setBulkAssignModal(true)} className="px-3 py-1.5 bg-black/10 hover:bg-black/20 rounded text-xs uppercase">Assign User</button>
+              <button onClick={() => setBulkDeleteDialog(true)} className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs uppercase">Delete</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-xs text-[--text-secondary] mt-4 font-mono select-none">
+          <span>Page {page} of {totalPages} (total {totalLeads} records)</span>
+          <div className="flex gap-2">
+            <button
+              disabled={page <= 1}
+              onClick={() => updateQueryParam('page', String(page - 1), { resetPage: false })}
+              className="px-3 py-1.5 border border-[--border-strong] hover:bg-stone-50 rounded-lg disabled:opacity-30 bg-white"
+            >
+              <ChevronLeft size={14} className="inline mr-1" /> Prev
+            </button>
+            <button
+              disabled={page >= totalPages}
+              onClick={() => updateQueryParam('page', String(page + 1), { resetPage: false })}
+              className="px-3 py-1.5 border border-[--border-strong] hover:bg-stone-50 rounded-lg disabled:opacity-30 bg-white"
+            >
+              Next <ChevronRight size={14} className="inline ml-1" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* CSV Import Modal */}
+      {csvImportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 backdrop-blur-sm p-4">
+          <div className="glass-panel w-full max-w-lg p-6 bg-white border border-[--border] text-[--text-primary] shadow-xl rounded-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-[--border] pb-3">
+              <h3 className="text-lg font-bold text-[--text-primary] flex items-center gap-2">
+                <FileSpreadsheet className="text-[--accent]" size={20} />
+                <span>Import Leads from CSV</span>
+              </h3>
+              <button onClick={handleCloseImportModal} className="p-1 border border-[--border-strong] rounded text-[--text-secondary] hover:bg-stone-50">
+                <X size={16} />
+              </button>
+            </div>
+
+            {uploadStatus === 'idle' && (
+              <form onSubmit={handleCsvUploadSubmit} className="space-y-4">
+                <div 
+                  className="border-2 border-dashed border-[--border-strong] rounded-xl p-8 text-center bg-stone-50/50 hover:bg-stone-50 transition-all cursor-pointer relative"
+                  onClick={() => document.getElementById('csv-file-picker').click()}
+                >
+                  <input
+                    type="file"
+                    id="csv-file-picker"
+                    accept=".csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        if (!file.name.endsWith('.csv') && file.type !== 'text/csv') {
+                          toast.error('Invalid file format. Please upload a CSV file.');
+                          setSelectedFile(null);
+                        } else {
+                          setSelectedFile(file);
+                        }
+                      }
+                    }}
+                  />
+                  <Upload className="mx-auto text-[--text-muted] mb-2" size={32} />
+                  {selectedFile ? (
+                    <div>
+                      <p className="text-sm font-semibold text-[--accent]">{selectedFile.name}</p>
+                      <p className="text-xs text-[--text-secondary] mt-1">{(selectedFile.size / 1024).toFixed(1)} KB</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-sm font-semibold text-[--text-primary]">Click to select CSV file</p>
+                      <p className="text-xs text-[--text-secondary] mt-1">Accepts only standard .csv format spreadsheets</p>
+                    </div>
+                  )}
+                </div>
+
+                {isAdmin && (
+                  <FilterInput label="Optionally assign all imported leads to operator">
+                    <select value={assignTarget} onChange={(e) => setAssignTarget(e.target.value)} className="w-full">
+                      <option value="">-- Leave Unassigned --</option>
+                      {agents.map((agent) => (
+                        <option key={agent._id} value={agent._id}>{agent.name}</option>
+                      ))}
+                    </select>
+                  </FilterInput>
+                )}
+
+                <div className="flex items-center justify-between pt-2">
+                  <button
+                    type="button"
+                    onClick={handleDownloadTemplate}
+                    className="text-xs font-bold text-[--accent] hover:underline flex items-center gap-1 bg-transparent border-0 cursor-pointer"
+                  >
+                    <Download size={13} />
+                    <span>Download CSV Template</span>
+                  </button>
+                  
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCloseImportModal}
+                      className="px-4 py-2 border border-[--border-strong] rounded-lg text-sm text-[--text-secondary] font-semibold bg-white hover:bg-stone-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!selectedFile}
+                      className="px-4 py-2 bg-[--accent] text-white rounded-lg font-bold text-sm hover:bg-[--accent-hover] shadow-sm disabled:opacity-40"
+                    >
+                      Import Leads
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
+
+            {(uploadStatus === 'uploading' || uploadStatus === 'processing') && (
+              <div className="py-8 flex flex-col items-center justify-center space-y-4 text-center">
+                <Loader />
+                <div className="w-full max-w-xs space-y-1">
+                  <p className="text-sm font-semibold text-[--text-primary]">
+                    {uploadStatus === 'uploading' ? 'Uploading file to server...' : 'Processing leads in background...'}
+                  </p>
+                  <div className="w-full bg-stone-100 h-2 rounded-full overflow-hidden">
+                    <div className="bg-[--accent] h-full transition-all duration-300" style={{ width: `${uploadProgress}%` }}></div>
+                  </div>
+                  <p className="text-[10px] text-[--text-secondary] font-mono">{uploadProgress}% processed</p>
+                </div>
+              </div>
+            )}
+
+            {(uploadStatus === 'done' || uploadStatus === 'failed') && uploadResult && (
+              <div className="space-y-4">
+                <div className="flex flex-col items-center text-center space-y-2 py-4">
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center ${uploadStatus === 'done' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+                    <CheckCircle2 size={28} />
+                  </div>
+                  <h4 className="text-md font-bold text-[--text-primary]">
+                    {uploadStatus === 'done' ? 'CSV Import Completed' : 'CSV Import Failed'}
+                  </h4>
+                  <p className="text-xs text-[--text-secondary]">
+                    Batch ID: <span className="font-mono">{selectedFile?.name}</span>
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                  <div className="bg-green-50/50 border border-green-100 p-2.5 rounded-lg">
+                    <span className="block text-lg font-black text-green-600">{uploadResult.successCount}</span>
+                    <span className="text-[10px] text-[--text-secondary] font-semibold">Success</span>
+                  </div>
+                  <div className="bg-amber-50/50 border border-amber-100 p-2.5 rounded-lg">
+                    <span className="block text-lg font-black text-amber-500">{uploadResult.duplicateCount}</span>
+                    <span className="text-[10px] text-[--text-secondary] font-semibold">Skipped (Dup)</span>
+                  </div>
+                  <div className="bg-red-50/50 border border-red-100 p-2.5 rounded-lg">
+                    <span className="block text-lg font-black text-red-600">{uploadResult.failedCount}</span>
+                    <span className="text-[10px] text-[--text-secondary] font-semibold">Errors</span>
+                  </div>
+                </div>
+
+                {uploadResult.errors.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] font-bold text-red-600 uppercase tracking-wider block">Error Log Summary:</span>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const res = await axios.get(`/api/v1/leads/csv/logs/${uploadResult.batchId}/failed-rows`, { responseType: 'blob' });
+                            const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
+                            const url = URL.createObjectURL(blob);
+                            const link = document.createElement('a');
+                            link.setAttribute('href', url);
+                            link.setAttribute('download', `error-report-${uploadResult.batchId}.csv`);
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                          } catch {
+                            toast.error('Failed to download error report.');
+                          }
+                        }}
+                        className="text-[10px] font-bold text-[--accent] hover:underline flex items-center gap-1 bg-transparent border-0 cursor-pointer"
+                      >
+                        <Download size={11} />
+                        <span>Download Full Error Report</span>
+                      </button>
+                    </div>
+                    <div className="border border-red-100 rounded-lg p-3 bg-red-50/20 max-h-[140px] overflow-y-auto text-xs font-mono text-red-600 space-y-1">
+                      {uploadResult.errors.slice(0, 50).map((err, idx) => (
+                        <div key={idx} className="flex gap-2">
+                          <span className="font-bold">Row {err.row}:</span>
+                          <span>{err.reason}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    onClick={handleCloseImportModal}
+                    className="px-6 py-2 bg-[--accent] text-white font-bold rounded-lg text-sm hover:bg-[--accent-hover] shadow-sm"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {leadModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-stone-900/40 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="glass-panel w-full max-w-5xl p-6 bg-white border border-[--border] text-[--text-primary] my-6 shadow-xl">
+            <div className="flex items-start justify-between gap-4 mb-5">
+              <div>
+                <h2 className="text-xl font-bold text-[--text-primary]">{selectedLead ? 'Edit Lead' : 'Create Lead'}</h2>
+                <p className="text-xs text-[--text-secondary] mt-1">
+                  Base lead fields stay at the top. Custom fields stay below so the panel stays clean.
+                </p>
+              </div>
+              <button type="button" onClick={() => setLeadModalOpen(false)} className="px-3 py-1.5 border border-[--border-strong] hover:bg-stone-50 rounded-lg text-xs font-semibold text-[--text-secondary]">
+                Close
+              </button>
+            </div>
+
+            {formErrors.length > 0 && (
+              <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2 rounded-lg mb-4">
+                <AlertCircle size={14} />
+                <span>{formErrors[0]}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleLeadSubmit} className="space-y-6">
+              <FormSection title="Lead Fields">
+                <FormField label="Name *">
+                  <input required value={leadFormName} onChange={(event) => setLeadFormName(event.target.value)} />
+                </FormField>
+                <FormField label="Number *">
+                  <input required value={leadFormPhone} onChange={(event) => setLeadFormPhone(event.target.value)} />
+                </FormField>
+                <FormField label="Business">
+                  <input value={leadFormBusiness} onChange={(event) => setLeadFormBusiness(event.target.value)} />
+                </FormField>
+                {!subVerticalFilter && (
+                  <FormField label="Sub-Vertical">
+                    <select
+                      value={leadFormSubVerticalId || ''}
+                      onChange={(event) => setLeadFormSubVerticalId(event.target.value)}
+                    >
+                      <option value="">-- None (Vertical Level) --</option>
+                      {subVerticals.map((sub) => (
+                        <option key={sub._id} value={sub._id}>{sub.name}</option>
+                      ))}
+                    </select>
+                  </FormField>
+                )}
+                {BASE_DYNAMIC_FIELDS.map((field) => (
+                  <FormField key={field.key} label={field.label}>
+                    <input
+                      type={field.type === 'date' ? 'date' : field.type === 'url' ? 'url' : 'text'}
+                      value={getDynamicValue(leadFormDynamic, field.key)}
+                      onChange={(event) => handleDynamicChange(field.key, event.target.value)}
+                    />
+                  </FormField>
+                ))}
+              </FormSection>
+
+              {customConfigs.length > 0 && (
+                <FormSection title="Custom Fields">
+                  {customConfigs.map((config) => (
+                    <FormField key={config._id} label={`${config.label}${config.isRequired ? ' *' : ''}`}>
+                      <CustomFieldInput
+                        config={config}
+                        value={getDynamicValue(leadFormDynamic, config.fieldKey) || undefined}
+                        onChange={(value) => handleDynamicChange(config.fieldKey, value)}
+                      />
+                    </FormField>
+                  ))}
+                </FormSection>
+              )}
+
+              <div className="flex justify-end gap-3 border-t border-[--border-strong] pt-4">
+                <button type="button" onClick={() => setLeadModalOpen(false)} className="px-4 py-2 border border-[--border-strong] hover:bg-stone-50 rounded-lg text-sm font-semibold text-[--text-secondary]">
+                  Cancel
+                </button>
+                <button type="submit" className="px-4 py-2 bg-[--accent] text-white font-bold rounded-lg text-sm hover:bg-[--accent-hover] shadow-sm">
+                  Save Lead
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        isOpen={bulkDeleteDialog}
+        title="Bulk Delete Leads"
+        description={`Are you sure you want to delete these ${selectedRowIds.length} checked leads?`}
+        confirmLabel="Bulk Delete"
+        danger
+        onConfirm={handleBulkDelete}
+        onCancel={() => setBulkDeleteDialog(false)}
+      />
+
+      {bulkAssignModal && (
+        <Modal title="Bulk Assign Leads" onClose={() => setBulkAssignModal(false)}>
+          <p className="text-xs text-[--text-secondary] mb-4">Choose an active member to assign all {selectedRowIds.length} checked leads.</p>
+          <FilterInput label="Select Operator">
+            <select value={bulkAssignTarget} onChange={(event) => setBulkAssignTarget(event.target.value)} className="w-full">
+              <option value="">-- Unassign All --</option>
+              {agents.map((agent) => (
+                <option key={agent._id} value={agent._id}>{agent.name}</option>
+              ))}
+            </select>
+          </FilterInput>
+          <div className="flex justify-end gap-3 mt-6">
+            <button onClick={() => setBulkAssignModal(false)} className="px-4 py-2 border border-[--border-strong] hover:bg-stone-50 rounded-lg text-xs font-semibold text-[--text-secondary]">Cancel</button>
+            <button onClick={handleBulkAssign} className="px-4 py-2 bg-[--accent] text-white font-bold rounded-lg text-xs hover:bg-[--accent-hover]">Reassign</button>
+          </div>
+        </Modal>
+      )}
+
+      {bulkStatusModal && (
+        <Modal title="Bulk Change Status" onClose={() => setBulkStatusModal(false)}>
+          <p className="text-xs text-[--text-secondary] mb-4">Choose the target status for all {selectedRowIds.length} checked leads.</p>
+          <FilterInput label="Select Status">
+            <select value={bulkStatusTarget} onChange={(event) => setBulkStatusTarget(event.target.value)} className="w-full">
+              {STATUS_OPTIONS.map((status) => (
+                <option key={status.value} value={status.value}>{status.label}</option>
+              ))}
+            </select>
+          </FilterInput>
+          <div className="flex justify-end gap-3 mt-6">
+            <button onClick={() => setBulkStatusModal(false)} className="px-4 py-2 border border-[--border-strong] hover:bg-stone-50 rounded-lg text-xs font-semibold text-[--text-secondary]">Cancel</button>
+            <button onClick={handleBulkStatusChange} className="px-4 py-2 bg-[--accent] text-white font-bold rounded-lg text-xs hover:bg-[--accent-hover]">Apply</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+const CustomFieldInput = ({ config, value, onChange }) => {
+  if (config.fieldType === 'select') {
+    return (
+      <select value={value || ''} onChange={(event) => onChange(event.target.value)}>
+        <option value="">-- Choose Option --</option>
+        {config.options?.map((option) => (
+          <option key={option} value={option}>{option}</option>
+        ))}
+      </select>
+    );
+  }
+
+  if (config.fieldType === 'boolean') {
+    return (
+      <label className="flex items-center gap-2 py-2 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={!!value}
+          onChange={(event) => onChange(event.target.checked)}
+          className="accent-[--accent] w-4 h-4"
+        />
+        <span className="text-xs text-[--text-primary]">Yes</span>
+      </label>
+    );
+  }
+
+  if (config.fieldType === 'textarea') {
+    return <textarea rows={4} value={value || ''} onChange={(event) => onChange(event.target.value)} />;
+  }
+
+  return (
+    <input
+      type={config.fieldType === 'number' ? 'number' : config.fieldType === 'date' ? 'date' : config.fieldType === 'url' ? 'url' : 'text'}
+      value={value || ''}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  );
+};
+
+const FilterInput = ({ label, children }) => (
+  <div className="flex flex-col gap-1.5">
+    <label className="text-[10px] font-bold text-[--text-secondary] uppercase">{label}</label>
+    {children}
+  </div>
+);
+
+const FormSection = ({ title, children }) => (
+  <section className="border-t border-[--border-strong] pt-5">
+    <h3 className="text-sm font-black text-[--text-primary] uppercase tracking-wide mb-4">{title}</h3>
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">{children}</div>
+  </section>
+);
+
+const FormField = ({ label, children }) => (
+  <div className="flex flex-col gap-1">
+    <label className="text-xs font-bold text-[--text-secondary] uppercase">{label}</label>
+    {children}
+  </div>
+);
+
+const Modal = ({ title, onClose, children }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 backdrop-blur-sm p-4">
+    <div className="glass-panel w-full max-w-sm p-6 bg-white border border-[--border] text-[--text-primary] shadow-xl">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <h3 className="text-lg font-bold text-[--text-primary]">{title}</h3>
+        <button onClick={onClose} className="px-2 py-1 border border-[--border-strong] rounded text-xs font-semibold text-[--text-secondary] hover:bg-stone-50">Close</button>
+      </div>
+      {children}
+    </div>
+  </div>
+);
+
+export default LeadsPage;

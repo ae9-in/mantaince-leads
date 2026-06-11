@@ -1,0 +1,173 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Design Tokens ─────────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    /* Cream / warm-white palette */
+    --bg-page:        #faf7f2;
+    --bg-sidebar:     #f5f0e8;
+    --bg-card:        #ffffff;
+    --bg-card-hover:  #fdf9f4;
+    --bg-input:       #fefcf8;
+
+    --accent:         #c8956c;       /* warm terracotta accent */
+    --accent-hover:   #b8804f;
+    --accent-light:   rgba(200, 149, 108, 0.12);
+    --accent-border:  rgba(200, 149, 108, 0.30);
+
+    --text-primary:   #2d2520;       /* deep warm brown */
+    --text-secondary: #7a6a5a;       /* muted warm brown */
+    --text-muted:     #b5a898;       /* very muted */
+
+    --border:         rgba(180, 155, 130, 0.25);
+    --border-strong:  rgba(180, 155, 130, 0.50);
+
+    --shadow-sm:      0 1px 3px rgba(45, 37, 32, 0.07), 0 1px 2px rgba(45, 37, 32, 0.04);
+    --shadow-md:      0 4px 12px rgba(45, 37, 32, 0.09), 0 2px 6px rgba(45, 37, 32, 0.05);
+    --shadow-lg:      0 8px 24px rgba(45, 37, 32, 0.12), 0 4px 10px rgba(45, 37, 32, 0.06);
+
+    --radius:         10px;
+  }
+
+  html, body, #root {
+    height: 100%;
+    background-color: var(--bg-page);
+    color: var(--text-primary);
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Global form element overrides */
+  input, select, textarea {
+    background: var(--bg-input);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    padding: 0.5rem 0.75rem;
+    color: var(--text-primary);
+    font-size: 0.8125rem;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    outline: none;
+    width: 100%;
+  }
+
+  input:focus, select:focus, textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-light);
+  }
+
+  input::placeholder, textarea::placeholder {
+    color: var(--text-muted);
+  }
+
+  select {
+    color-scheme: light;
+    appearance: auto;
+  }
+
+  select option {
+    background-color: #fefcf8;
+    color: var(--text-primary);
+  }
+}
+
+/* ─── Glass / Card panels ────────────────────────────────────────────────────── */
+.glass-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+
+.card-elevated {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+}
+
+/* ─── Accent glow (light version) ───────────────────────────────────────────── */
+.glow-shadow {
+  box-shadow: 0 0 0 1px var(--accent-border), var(--shadow-md);
+}
+
+/* ─── Spinner ────────────────────────────────────────────────────────────────── */
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 2.5px solid var(--accent-light);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ─── Square loader ──────────────────────────────────────────────────────────── */
+@keyframes loader_5191 {
+  from { opacity: 0.15; }
+  to   { opacity: 1; }
+}
+
+.custom-loader-container {
+  position: relative;
+  width: 60px;
+  height: 60px;
+}
+
+.custom-loader-container.small {
+  transform: scale(0.5);
+}
+
+.custom-loader-square {
+  background: var(--accent);
+  width: 10px;
+  height: 10px;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  margin-top: -5px;
+  margin-left: -5px;
+  border-radius: 2px;
+}
+
+#sq1 { margin-top:-25px; margin-left:-25px; animation: loader_5191 675ms ease-in-out 0ms   infinite alternate; }
+#sq2 { margin-top:-25px;                    animation: loader_5191 675ms ease-in-out 75ms  infinite alternate; }
+#sq3 { margin-top:-25px; margin-left:15px;  animation: loader_5191 675ms ease-in-out 150ms infinite alternate; }
+#sq4 {                   margin-left:-25px; animation: loader_5191 675ms ease-in-out 225ms infinite alternate; }
+#sq5 {                                      animation: loader_5191 675ms ease-in-out 300ms infinite alternate; }
+#sq6 {                   margin-left:15px;  animation: loader_5191 675ms ease-in-out 375ms infinite alternate; }
+#sq7 { margin-top:15px;  margin-left:-25px; animation: loader_5191 675ms ease-in-out 450ms infinite alternate; }
+#sq8 { margin-top:15px;                    animation: loader_5191 675ms ease-in-out 525ms infinite alternate; }
+#sq9 { margin-top:15px;  margin-left:15px;  animation: loader_5191 675ms ease-in-out 600ms infinite alternate; }
+
+/* ─── Utility overrides for the light theme ─────────────────────────────────── */
+/* Active nav item */
+.nav-active {
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Subtle pulse for workspace badge */
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.75; }
+}
+.animate-pulse-subtle {
+  animation: pulse-subtle 2.5s ease-in-out infinite;
+}
+
+/* Table row hover */
+tr:hover td {
+  background-color: var(--bg-card-hover);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }

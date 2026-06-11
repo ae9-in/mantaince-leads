@@ -160,7 +160,7 @@ app.use((err, req, res, next) => {
 });
 
 // Register Bull Queue Worker in the server process to ensure it runs concurrently
-if (process.env.NODE_ENV !== 'test') {
+if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
   console.log('👷 Centralized CSV Queue Worker Initializing...');
   
   csvQueue.process(async (job) => {
@@ -188,7 +188,7 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 // Start listening
-if (process.env.NODE_ENV !== 'test') {
+if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
   const server = app.listen(PORT, () => {
     console.log(`🚀 LeadsBase API Listening in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
   });

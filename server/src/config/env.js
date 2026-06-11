@@ -12,7 +12,6 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 const envSchema = z.object({
   PORT: z.string().transform(Number).default('5000'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  MONGODB_URI: z.string().min(1, 'MONGODB_URI is required'),
   JWT_ACCESS_SECRET: z.string().min(32, 'JWT_ACCESS_SECRET must be at least 32 characters'),
   JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 characters'),
   CLIENT_URL: z.string().url('CLIENT_URL must be a valid URL'),
@@ -58,7 +57,6 @@ export default env;
 export const {
   PORT,
   NODE_ENV,
-  MONGODB_URI,
   JWT_ACCESS_SECRET,
   JWT_REFRESH_SECRET,
   CLIENT_URL,

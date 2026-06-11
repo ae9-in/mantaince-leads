@@ -15,7 +15,20 @@ export const useAuthStore = create((set, get) => ({
   user: getInitialUser(),
   accessToken: null,
   isAuthenticated: !!getInitialUser(),
+  isInitializing: true,
   loading: false,
+
+  initializeAuth: async () => {
+    if (localStorage.getItem('user')) {
+      try {
+        await get().refreshToken();
+      } catch {
+        localStorage.removeItem('user');
+        set({ user: null, accessToken: null, isAuthenticated: false });
+      }
+    }
+    set({ isInitializing: false });
+  },
 
   login: async (email, password) => {
     set({ loading: true });

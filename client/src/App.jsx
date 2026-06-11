@@ -56,6 +56,16 @@ const PublicRoute = ({ children }) => {
 };
 
 export const App = () => {
+  const { isInitializing, initializeAuth } = useAuthStore();
+
+  React.useEffect(() => {
+    initializeAuth();
+  }, [initializeAuth]);
+
+  if (isInitializing) {
+    return <LoadingScreen />;
+  }
+
   return (
     <>
       <Toaster

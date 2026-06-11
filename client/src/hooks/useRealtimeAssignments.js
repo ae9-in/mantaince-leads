@@ -29,7 +29,8 @@ export function useRealtimeAssignments() {
     if (!user || !accessToken) return;
 
     // Pass token in query string since EventSource doesn't support headers
-    const streamUrl = `/api/v1/assignments/stream?token=${accessToken}`;
+    const apiBase = import.meta.env.VITE_API_URL || '';
+    const streamUrl = `${apiBase}/api/v1/assignments/stream?token=${accessToken}`;
     const es = new EventSource(streamUrl, { withCredentials: true });
 
     es.addEventListener('message', handleMessage);

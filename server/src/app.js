@@ -116,6 +116,10 @@ app.get('/health', (req, res) => {
   res.status(200).json({ success: true, data: { status: 'online', time: new Date() } });
 });
 
+app.get('/', (req, res) => {
+  res.status(200).json({ success: true, message: 'LeadsBase API is operational. Access endpoints via /api/v1' });
+});
+
 // 5. Global Error Handling Middleware (Section 11 specifications)
 app.use((err, req, res, next) => {
   console.error('❌ Server Error Context:', err);

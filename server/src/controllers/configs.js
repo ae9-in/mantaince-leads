@@ -7,6 +7,7 @@ import {
     invalidateOnTaxonomyChange
 } from '../services/cache.js';
 import { CacheKeys, TTL } from '../lib/cacheKeys.js';
+import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 
 /**
  * GET /verticals/:verticalId/fields
@@ -62,14 +63,15 @@ export const createFieldConfig = async (req, res) => {
         const configRes = await query(`
             INSERT INTO field_configs (
                 id, vertical_id, field_key, label, field_type, options,
-                is_required, is_csv_mapped, csv_header, display_order, is_visible
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                is_required, is_csv_mapped, csv_header, display_order, is_visible, is_active, is_table_column
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             RETURNING *
         `, [
             configId, verticalId, fieldData.fieldKey, fieldData.label, fieldData.fieldType,
             fieldData.options || [], fieldData.isRequired || false,
             fieldData.isCsvMapped || false, fieldData.csvHeader || '',
-            fieldData.displayOrder || 0, fieldData.isVisible !== false
+            fieldData.displayOrder || 0, fieldData.isVisible !== false,
+            fieldData.isActive !== false, fieldData.isTableColumn !== false
         ]);
 
         const config = configRes.rows[0];
@@ -77,6 +79,8 @@ export const createFieldConfig = async (req, res) => {
         await invalidateOnTaxonomyChange(verticalId);
 
         logAudit(req, { action: 'field_config.create', targetCollection: 'field_configs', targetId: config.id, after: config });
+
+        broadcastToAll({ type: 'LEAD_MUTATED', verticalId, action: 'field_config_create' });
 
         return res.status(201).json({ success: true, data: config });
     } catch (error) {
@@ -103,7 +107,7 @@ export const updateFieldConfig = async (req, res) => {
         }
 
         const before     = { ...config };
-        const fields     = ['label', 'field_type', 'options', 'is_required', 'is_csv_mapped', 'csv_header', 'display_order', 'is_visible'];
+        const fields     = ['label', 'field_type', 'options', 'is_required', 'is_csv_mapped', 'csv_header', 'display_order', 'is_visible', 'is_active', 'is_table_column'];
         const setClauses = [];
         const params     = [fieldId];
         let   pIdx       = 2;
@@ -129,6 +133,8 @@ export const updateFieldConfig = async (req, res) => {
         await invalidateOnTaxonomyChange(config.vertical_id);
 
         logAudit(req, { action: 'field_config.update', targetCollection: 'field_configs', targetId: fieldId, before, after: updatedConfig });
+
+        broadcastToAll({ type: 'LEAD_MUTATED', verticalId: config.vertical_id, action: 'field_config_update' });
 
         return res.status(200).json({ success: true, data: updatedConfig });
     } catch (error) {
@@ -177,6 +183,8 @@ export const deleteFieldConfig = async (req, res) => {
 
         logAudit(req, { action: 'field_config.delete', targetCollection: 'field_configs', targetId: fieldId, before: config });
 
+        broadcastToAll({ type: 'LEAD_MUTATED', verticalId, action: 'field_config_delete' });
+
         return res.status(200).json({ success: true, data: { message: 'Field configuration deleted successfully' } });
     } catch (error) {
         return res.status(500).json({ success: false, error: error.message });
@@ -216,6 +224,8 @@ export const reorderFieldConfigs = async (req, res) => {
         `, params);
 
         await invalidateOnTaxonomyChange(verticalId);
+
+        broadcastToAll({ type: 'LEAD_MUTATED', verticalId, action: 'field_config_reorder' });
 
         return res.status(200).json({ success: true, data: { message: 'Field positions updated successfully' } });
     } catch (error) {

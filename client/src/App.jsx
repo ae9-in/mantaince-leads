@@ -18,6 +18,10 @@ const ReportsPage = lazy(() => import('./pages/ReportsPage.jsx'));
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage.jsx'));
 const AdminVerticalsPage = lazy(() => import('./pages/AdminVerticalsPage.jsx'));
 const AdminFieldsPage = lazy(() => import('./pages/AdminFieldsPage.jsx'));
+const AdminSubVerticalFieldsPage = lazy(() => import('./pages/AdminSubVerticalFieldsPage.jsx'));
+const CalendarPage = lazy(() => import('./pages/CalendarPage.jsx'));
+const FollowUpsPage = lazy(() => import('./pages/FollowUpsPage.jsx'));
+const AdminDashboardPage = lazy(() => import('./pages/AdminDashboardPage.jsx'));
 
 // Loader spinner
 const LoadingScreen = () => (
@@ -115,8 +119,15 @@ export const App = () => {
               <Route path="leads/:id" element={<LeadDetailPage />} />
 
               <Route path="reports" element={<ReportsPage />} />
+              <Route path="calendar" element={<CalendarPage />} />
+              <Route path="follow-ups" element={<FollowUpsPage />} />
 
               {/* Admin Scoped views */}
+              <Route path="admin/dashboard" element={
+                <PermissionRoute roleRequired="admin">
+                  <AdminDashboardPage />
+                </PermissionRoute>
+              } />
               <Route path="admin/users" element={
                 <PermissionRoute roleRequired="admin">
                   <AdminUsersPage />
@@ -130,6 +141,11 @@ export const App = () => {
               <Route path="admin/verticals/:id/fields" element={
                 <PermissionRoute roleRequired="admin">
                   <AdminFieldsPage />
+                </PermissionRoute>
+              } />
+              <Route path="admin/sub-verticals/:subVerticalId/fields" element={
+                <PermissionRoute roleRequired="admin">
+                  <AdminSubVerticalFieldsPage />
                 </PermissionRoute>
               } />
             </Route>

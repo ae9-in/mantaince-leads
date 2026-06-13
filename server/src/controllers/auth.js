@@ -60,26 +60,25 @@ export const login = async (req, res) => {
       return res.status(401).json({ success: false, error: 'Invalid email or password' });
     }
 
-    // Update last_login_at
+    // Update last_login_at and save session refresh hash in parallel
     const lastLoginAt = new Date();
-    await query('UPDATE users SET last_login_at = $1 WHERE id = $2', [lastLoginAt, user.id]);
-
-    // Sign tokens
     const accessToken = signAccessToken(user, user.role_name, user.permissions);
     const refreshToken = signRefreshToken(user.id);
-
-    // Save session refresh hash
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    await query(`
-      INSERT INTO sessions (id, user_id, token_hash, expires_at, ip, user_agent)
-      VALUES ($1, $2, $3, $4, $5, $6)
-    `, [
-      crypto.randomUUID(),
-      user.id,
-      hashToken(refreshToken),
-      expiresAt,
-      req.ip || '',
-      req.headers['user-agent'] || ''
+
+    await Promise.all([
+      query('UPDATE users SET last_login_at = $1 WHERE id = $2', [lastLoginAt, user.id]),
+      query(`
+        INSERT INTO sessions (id, user_id, token_hash, expires_at, ip, user_agent)
+        VALUES ($1, $2, $3, $4, $5, $6)
+      `, [
+        crypto.randomUUID(),
+        user.id,
+        hashToken(refreshToken),
+        expiresAt,
+        req.ip || '',
+        req.headers['user-agent'] || ''
+      ])
     ]);
 
     setRefreshCookie(res, refreshToken);

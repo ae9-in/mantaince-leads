@@ -18,8 +18,15 @@ import leadsRouter from './routes/leads.js';
 import auditRouter from './routes/audit.js';
 import reportsRouter from './routes/reports.js';
 import assignmentsRouter from './routes/assignments.js';
+import adminRouter from './routes/admin.js';
+import followUpsRouter from './routes/followUps.js';
 import { csvQueue } from './jobs/queue.js';
 import { processCsvJob } from './jobs/csvProcessor.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 
@@ -126,6 +133,11 @@ app.use('/api/v1/leads', leadsRouter);
 app.use('/api/v1/audit-logs', auditRouter);
 app.use('/api/v1/reports', reportsRouter);
 app.use('/api/v1/assignments', assignmentsRouter);
+app.use('/api/v1/admin', adminRouter);
+app.use('/api/v1/followUps', followUpsRouter);
+
+// Serve static uploads
+app.use('/uploads', express.static(path.join(__dirname, '../../uploads')));
 
 // Lightweight status checkpoint endpoint
 app.get('/health', (req, res) => {
@@ -213,7 +225,7 @@ if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
     console.log(`🚀 LeadsBase API Listening in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
   });
 
-  // Graceful shutdown handler
+  // Graceful shutdown handler (trigger nodemon restart)
   const shutdown = async (signal) => {
     console.log(`🛑 ${signal} received — shutting down gracefully...`);
     

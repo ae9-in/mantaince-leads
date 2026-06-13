@@ -51,6 +51,8 @@ model User {
   verticalsCreated     Vertical[]
   subVerticalsCreated  SubVertical[]
   fieldConfigsCreated  FieldConfig[]
+  assignedFollowUps    FollowUp[]        @relation("FollowUpAssignee")
+  createdFollowUps     FollowUp[]        @relation("FollowUpCreator")
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
 }
@@ -105,7 +107,9 @@ model SubVertical {
   creator        User?             @relation(fields: [createdBy], references: [id])
   leads          Lead[]
   userAccess     UserSubVertical[]
-  userAssignments UserAssignment[]
+  users          UserAssignment[]
+  customFields   CustomField[]
+  followUps      FollowUp[]
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
@@ -160,6 +164,15 @@ model Lead {
   deletedAt     DateTime?
   deletedBy     String?
   deletedByUser User?        @relation("LeadsDeleted", fields: [deletedBy], references: [id])
+  leadType      LeadType     @default(CALL)
+  geotagLat     Float?
+  geotagLng     Float?
+  geotagAccuracy Float?
+  geotagPhotoKey String?
+  geotagAddress  String?
+  geotagCapturedAt DateTime?
+  customValues  LeadCustomValue[]
+  followUps     FollowUp[]
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
@@ -231,3 +244,97 @@ model UserAssignment {
 
   @@unique([userId, subVerticalId])
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F3 — CUSTOM FIELDS PER SUB-VERTICAL
+// ─────────────────────────────────────────────────────────────────────────────
+
+model CustomField {
+  id            String          @id @default(cuid())
+  subVerticalId String
+  label         String          // display label: "GST Number"
+  fieldKey      String          // snake_case key: "gst_number"
+  fieldType     CustomFieldType @default(TEXT)
+  isRequired    Boolean         @default(false)
+  placeholder   String?
+  options       String[]        // for SELECT type: ["Option A", "Option B"]
+  order         Int             @default(0)
+  isActive      Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+
+  subVertical    SubVertical         @relation(fields: [subVerticalId], references: [id], onDelete: Cascade)
+  leadFieldValues LeadCustomValue[]
+
+  @@unique([subVerticalId, fieldKey])
+  @@index([subVerticalId, isActive, order])
+}
+
+enum CustomFieldType {
+  TEXT
+  NUMBER
+  DATE
+  SELECT
+  TEXTAREA
+  PHONE
+  EMAIL
+  URL
+}
+
+model LeadCustomValue {
+  id            String @id @default(cuid())
+  leadId        String
+  customFieldId String
+  value         String
+
+  lead        Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  customField CustomField @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
+
+  @@unique([leadId, customFieldId])
+  @@index([leadId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F4 — LEAD TYPE + GEOTAG
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum LeadType {
+  CALL
+  FIELD_VISIT
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F5 — FOLLOW-UPS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FollowUp {
+  id            String       @id @default(cuid())
+  leadId        String
+  subVerticalId String
+  assignedToId  String       // employee (User) assigned to follow up
+  createdById   String       // who created this follow-up
+  followUpDate  DateTime     // scheduled date+time of follow-up
+  description   String       // what happened / what to do
+  status        FollowUpStatus @default(PENDING)
+  completedAt   DateTime?
+  completedNote String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  lead        Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  assignedTo  User  @relation("FollowUpAssignee", fields: [assignedToId], references: [id])
+  createdBy   User  @relation("FollowUpCreator", fields: [createdById], references: [id])
+  subVertical SubVertical @relation(fields: [subVerticalId], references: [id])
+
+  @@index([leadId, followUpDate])
+  @@index([subVerticalId, followUpDate])       // calendar grid query
+  @@index([assignedToId, status, followUpDate]) // "my follow-ups" view
+  @@index([followUpDate])                       // date-range queries
+}
+
+enum FollowUpStatus {
+  PENDING
+  COMPLETED
+  MISSED
+  RESCHEDULED
+}
+

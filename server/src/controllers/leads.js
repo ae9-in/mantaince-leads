@@ -2,6 +2,9 @@ import { query } from '../config/db.js';
 import crypto from 'crypto';
 import { logAudit } from '../services/audit.js';
 import { isValidUUID } from '../utils/validators/index.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import {
     withCache, cacheGet, cacheSet, cacheDelete,
     invalidateOnLeadChange
@@ -61,6 +64,8 @@ export const getLeads = async (req, res) => {
         dateTo,
         includeCount = 'false',
         csvBatchId,
+        leadType,
+        stageId,
     } = req.query;
 
     try {
@@ -86,7 +91,7 @@ export const getLeads = async (req, res) => {
         const cacheHash = hashLeadListParams({
             subVerticalId, status, assignedTo, search, area,
             dateFrom, dateTo, sortBy, sortDir, cursor,
-            limit: limitNum, agentId, csvBatchId
+            limit: limitNum, agentId, csvBatchId, leadType, stageId
         });
         const cacheKey = CacheKeys.leadListPage(verticalId, cacheHash);
 
@@ -133,6 +138,14 @@ export const getLeads = async (req, res) => {
         if (csvBatchId && isValidUUID(csvBatchId)) {
             wheres.push(`l.csv_batch_id = $${pIdx++}`);
             params.push(csvBatchId);
+        }
+        if (leadType) {
+            wheres.push(`l.lead_type = $${pIdx++}`);
+            params.push(leadType);
+        }
+        if (stageId && isValidUUID(stageId)) {
+            wheres.push(`l.stage_id = $${pIdx++}`);
+            params.push(stageId);
         }
 
         // ── Full-text search vs. ILIKE fallback ───────────────────────────
@@ -184,14 +197,18 @@ export const getLeads = async (req, res) => {
                 l.status, l.source, l.data,
                 l.vertical_id, l.sub_vertical_id,
                 l.assigned_to, l.created_at, l.updated_at,
+                l.lead_type,
+                l.geotag_lat, l.geotag_lng, l.geotag_accuracy,
+                l.geotag_photo_key, l.geotag_address, l.geotag_captured_at,
+                l.stage_id,
                 -- Assignee name (LEFT JOIN — may be null)
                 u.name       AS assignee_name,
                 u.email      AS assignee_email,
                 -- Sub-vertical name (LEFT JOIN — may be null)
                 sv.name      AS sub_vertical_name
             FROM leads l
-            LEFT JOIN users         u  ON u.id  = l.assigned_to
-            LEFT JOIN sub_verticals sv ON sv.id = l.sub_vertical_id
+            LEFT JOIN users         u   ON u.id   = l.assigned_to
+            LEFT JOIN sub_verticals sv  ON sv.id  = l.sub_vertical_id
             WHERE ${whereClause}
             ORDER BY ${sortCol} ${dir}, l.id ${dir}
             LIMIT $${pIdx}
@@ -251,11 +268,22 @@ export const getLeads = async (req, res) => {
  * inserts in one round-trip instead of two serial queries.
  */
 export const createLead = async (req, res) => {
-    const { name, phone, businessName, verticalId, subVerticalId, assignedTo, data = {} } = req.body;
+    const { 
+        name, phone, businessName, verticalId, subVerticalId, assignedTo, 
+        data = {}, leadType = 'CALL', 
+        geotagLat, geotagLng, geotagAccuracy, geotagPhotoKey, geotagAddress, geotagCapturedAt,
+        customValues = {}, stageId,
+        status = 'new'
+    } = req.body;
+
     if (!isValidUUID(verticalId)) {
         return res.status(400).json({ success: false, error: 'Invalid vertical ID format' });
     }
     try {
+        if (!subVerticalId || !isValidUUID(subVerticalId)) {
+            return res.status(400).json({ success: false, error: 'Sub-vertical selection is mandatory for creating leads.' });
+        }
+
         // RBAC scoping
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
@@ -266,6 +294,11 @@ export const createLead = async (req, res) => {
         const leadId = crypto.randomUUID();
         let leadRes;
 
+        const gLat = geotagLat ? parseFloat(geotagLat) : null;
+        const gLng = geotagLng ? parseFloat(geotagLng) : null;
+        const gAcc = geotagAccuracy ? parseFloat(geotagAccuracy) : null;
+        const gCap = geotagCapturedAt ? new Date(geotagCapturedAt) : null;
+
         if (phone) {
             leadRes = await query(`
                 WITH dedup AS (
@@ -274,8 +307,10 @@ export const createLead = async (req, res) => {
                     LIMIT 1
                 )
                 INSERT INTO leads
-                    (id, vertical_id, sub_vertical_id, assigned_to, uploaded_by, name, phone, business_name, data, status)
-                SELECT $3, $2, $4, $5, $6, $7, $1, $8, $9, 'new'
+                    (id, vertical_id, sub_vertical_id, assigned_to, uploaded_by, name, phone, business_name, data, status,
+                     lead_type, geotag_lat, geotag_lng, geotag_accuracy, geotag_photo_key, geotag_address, geotag_captured_at, stage_id)
+                SELECT $3, $2, $4, $5, $6, $7, $1, $8, $9, $18,
+                       $10, $11, $12, $13, $14, $15, $16, $17
                 WHERE NOT EXISTS (SELECT 1 FROM dedup)
                 RETURNING *
             `, [
@@ -284,7 +319,14 @@ export const createLead = async (req, res) => {
                 (subVerticalId && isValidUUID(subVerticalId)) ? subVerticalId : null,
                 (assignedTo    && isValidUUID(assignedTo))    ? assignedTo    : null,
                 req.user.sub,
-                name, businessName || '', JSON.stringify(data)
+                name, businessName || '', JSON.stringify(data),
+                leadType || 'CALL',
+                gLat, gLng, gAcc,
+                geotagPhotoKey || null,
+                geotagAddress || null,
+                gCap,
+                (stageId       && isValidUUID(stageId))       ? stageId       : null,
+                status || 'new'
             ]);
 
             if (leadRes.rows.length === 0) {
@@ -293,19 +335,71 @@ export const createLead = async (req, res) => {
         } else {
             leadRes = await query(`
                 INSERT INTO leads
-                    (id, vertical_id, sub_vertical_id, assigned_to, uploaded_by, name, phone, business_name, data, status)
-                VALUES ($1, $2, $3, $4, $5, $6, '', $7, $8, 'new')
+                    (id, vertical_id, sub_vertical_id, assigned_to, uploaded_by, name, phone, business_name, data, status,
+                     lead_type, geotag_lat, geotag_lng, geotag_accuracy, geotag_photo_key, geotag_address, geotag_captured_at, stage_id)
+                VALUES ($1, $2, $3, $4, $5, $6, '', $7, $8, $17,
+                        $9, $10, $11, $12, $13, $14, $15, $16)
                 RETURNING *
             `, [
                 leadId, verticalId,
                 (subVerticalId && isValidUUID(subVerticalId)) ? subVerticalId : null,
                 (assignedTo    && isValidUUID(assignedTo))    ? assignedTo    : null,
                 req.user.sub,
-                name, businessName || '', JSON.stringify(data)
+                name, businessName || '', JSON.stringify(data),
+                leadType || 'CALL',
+                gLat, gLng, gAcc,
+                geotagPhotoKey || null,
+                geotagAddress || null,
+                gCap,
+                (stageId       && isValidUUID(stageId))       ? stageId       : null,
+                status || 'new'
             ]);
         }
 
         const lead = leadRes.rows[0];
+
+        // Process Custom Fields values if sub-vertical custom fields exist
+        if (subVerticalId && customValues && Object.keys(customValues).length > 0) {
+            const customFieldsRes = await query(
+                'SELECT id, field_key, is_required, validation_regex, validation_message FROM custom_fields WHERE sub_vertical_id = $1 AND is_active = true',
+                [subVerticalId]
+            );
+            
+            const customInsertPromises = [];
+            for (const field of customFieldsRes.rows) {
+                const val = customValues[field.field_key];
+                if (field.is_required && (val === undefined || val === null || val === '')) {
+                    return res.status(400).json({ success: false, error: `Custom field '${field.field_key}' is required` });
+                }
+                
+                if (val !== undefined && val !== null && val !== '') {
+                    if (field.validation_regex) {
+                        try {
+                            const rx = new RegExp(field.validation_regex);
+                            if (!rx.test(val.toString())) {
+                                return res.status(400).json({ success: false, error: field.validation_message || `Invalid format for '${field.field_key}'` });
+                            }
+                        } catch (e) {
+                            if (e.message.includes('Invalid format')) {
+                                return res.status(400).json({ success: false, error: e.message });
+                            }
+                        }
+                    }
+                    
+                    const valId = crypto.randomUUID();
+                    customInsertPromises.push(
+                        query(`
+                            INSERT INTO lead_custom_values (id, lead_id, custom_field_id, value)
+                            VALUES ($1, $2, $3, $4)
+                            ON CONFLICT (lead_id, custom_field_id) DO UPDATE SET value = EXCLUDED.value
+                        `, [valId, leadId, field.id, String(val)])
+                    );
+                }
+            }
+            if (customInsertPromises.length > 0) {
+                await Promise.all(customInsertPromises);
+            }
+        }
 
         // Invalidate lead list cache for this vertical
         await invalidateOnLeadChange(verticalId, null);
@@ -319,6 +413,7 @@ export const createLead = async (req, res) => {
         return res.status(500).json({ success: false, error: error.message });
     }
 };
+
 
 /**
  * GET /leads/:id
@@ -362,9 +457,25 @@ export const getLeadById = async (req, res) => {
             if (!lead || lead.is_deleted) {
                 return res.status(404).json({ success: false, error: 'Lead not found' });
             }
+
+            // Fetch custom fields values
+            const customValuesRes = await query(`
+                SELECT cf.field_key, lcv.value
+                FROM lead_custom_values lcv
+                JOIN custom_fields cf ON lcv.custom_field_id = cf.id
+                WHERE lcv.lead_id = $1
+            `, [id]);
+            
+            const customValues = {};
+            customValuesRes.rows.forEach(row => {
+                customValues[row.field_key] = row.value;
+            });
+            lead.customValues = customValues;
+
             // Cache the full lead object
             cacheSet(cacheKey, lead, TTL.LEAD_DETAIL).catch(() => {});
         }
+
 
         // RBAC checks run after fetch — cheap in-memory checks
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(lead.vertical_id))) {
@@ -403,7 +514,11 @@ export const updateLead = async (req, res) => {
             return res.status(403).json({ success: false, error: 'Access forbidden: this lead is not assigned to you' });
         }
 
-        const fields = ['name', 'phone', 'business_name', 'status', 'sub_vertical_id', 'assigned_to'];
+        const fields = [
+            'name', 'phone', 'business_name', 'status', 'sub_vertical_id', 'assigned_to',
+            'lead_type', 'geotag_lat', 'geotag_lng', 'geotag_accuracy',
+            'geotag_photo_key', 'geotag_address', 'geotag_captured_at', 'stage_id'
+        ];
         const setClauses = [];
         const params     = [id];
         let   pIdx       = 2;
@@ -412,7 +527,15 @@ export const updateLead = async (req, res) => {
             const camelF = f.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
             if (updates[camelF] !== undefined) {
                 setClauses.push(`${f} = $${pIdx++}`);
-                params.push(updates[camelF]);
+                let val = updates[camelF];
+                if (f === 'geotag_lat' || f === 'geotag_lng' || f === 'geotag_accuracy') {
+                    val = val !== '' && val !== null ? parseFloat(val) : null;
+                } else if (f === 'geotag_captured_at') {
+                    val = val !== '' && val !== null ? new Date(val) : null;
+                } else if (f === 'stage_id') {
+                    val = val !== '' && val !== null && isValidUUID(val) ? val : null;
+                }
+                params.push(val);
             }
         });
 
@@ -420,6 +543,54 @@ export const updateLead = async (req, res) => {
             // Merge JSONB — keeps existing keys, overwrites provided ones
             setClauses.push(`data = data || $${pIdx++}`);
             params.push(JSON.stringify(updates.data));
+        }
+
+        // Process Custom Fields values if updates.customValues is provided
+        if (updates.customValues) {
+            const subVerticalId = updates.subVerticalId !== undefined ? updates.subVerticalId : lead.sub_vertical_id;
+            
+            if (subVerticalId) {
+                const customFieldsRes = await query(
+                    'SELECT id, field_key, is_required, validation_regex, validation_message FROM custom_fields WHERE sub_vertical_id = $1 AND is_active = true',
+                    [subVerticalId]
+                );
+                
+                const insertPromises = [];
+                for (const field of customFieldsRes.rows) {
+                    const val = updates.customValues[field.field_key];
+                    
+                    if (field.is_required && (val === null || val === '')) {
+                        return res.status(400).json({ success: false, error: `Custom field '${field.field_key}' is required` });
+                    }
+                    
+                    if (val !== undefined && val !== null && val !== '') {
+                        if (field.validation_regex) {
+                            try {
+                                const rx = new RegExp(field.validation_regex);
+                                if (!rx.test(val.toString())) {
+                                    return res.status(400).json({ success: false, error: field.validation_message || `Invalid format for '${field.field_key}'` });
+                                }
+                            } catch (e) {
+                                if (e.message.includes('Invalid format')) {
+                                    return res.status(400).json({ success: false, error: e.message });
+                                }
+                            }
+                        }
+                        
+                        const valId = crypto.randomUUID();
+                        insertPromises.push(
+                            query(`
+                                INSERT INTO lead_custom_values (id, lead_id, custom_field_id, value)
+                                VALUES ($1, $2, $3, $4)
+                                ON CONFLICT (lead_id, custom_field_id) DO UPDATE SET value = EXCLUDED.value
+                            `, [valId, id, field.id, String(val)])
+                        );
+                    }
+                }
+                if (insertPromises.length > 0) {
+                    await Promise.all(insertPromises);
+                }
+            }
         }
 
         if (setClauses.length === 0) {
@@ -445,6 +616,7 @@ export const updateLead = async (req, res) => {
         return res.status(500).json({ success: false, error: error.message });
     }
 };
+
 
 /**
  * DELETE /leads/:id (soft-delete)
@@ -590,7 +762,7 @@ export const exportLeadsCsv = async (req, res) => {
         `, [verticalId]);
 
         const leads     = leadsRes.rows;
-        const csvHeader = 'ID,Name,Phone,Business Name,Status,Sub-Vertical,Assignee,Source,Created At\n';
+        const csvHeader = 'ID,Name,Phone,Business Name,Status,Sub-Vertical,Employee Spoken,Source,Created At\n';
         const csvRows   = leads.map(l =>
             `"${l.id}","${l.name}","${l.phone}","${l.business_name}","${l.status}","${l.sub_vertical_name || ''}","${l.assignee_name || ''}","${l.source}","${l.created_at.toISOString()}"`
         ).join('\n');
@@ -602,3 +774,59 @@ export const exportLeadsCsv = async (req, res) => {
         return res.status(500).json({ success: false, error: error.message });
     }
 };
+
+export const uploadLeadPhoto = async (req, res) => {
+    const { id } = req.params;
+    if (!isValidUUID(id)) {
+        return res.status(404).json({ success: false, error: 'Lead not found' });
+    }
+    try {
+        const leadRes = await query('SELECT id, vertical_id, is_deleted, assigned_to FROM leads WHERE id = $1', [id]);
+        const lead = leadRes.rows[0];
+        if (!lead || lead.is_deleted) {
+            return res.status(404).json({ success: false, error: 'Lead not found' });
+        }
+
+        if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(lead.vertical_id))) {
+            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+        }
+        if (req.user.role === 'agent' && lead.assigned_to !== req.user.sub) {
+            return res.status(403).json({ success: false, error: 'Access forbidden: this lead is not assigned to you' });
+        }
+
+        if (!req.file) {
+            return res.status(400).json({ success: false, error: 'No file uploaded' });
+        }
+
+        const __filename = fileURLToPath(import.meta.url);
+        const __dirname = path.dirname(__filename);
+        const uploadsDir = path.join(__dirname, '../../../uploads');
+
+        if (!fs.existsSync(uploadsDir)) {
+            fs.mkdirSync(uploadsDir, { recursive: true });
+        }
+
+        const ext = path.extname(req.file.originalname) || '.jpg';
+        const filename = `${id}-${Date.now()}${ext}`;
+        const filepath = path.join(uploadsDir, filename);
+
+        fs.writeFileSync(filepath, req.file.buffer);
+
+        const photoKey = `/uploads/${filename}`;
+
+        // Update lead geotag photo key
+        const updatedRes = await query(
+            'UPDATE leads SET geotag_photo_key = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+            [photoKey, id]
+        );
+
+        await invalidateOnLeadChange(lead.vertical_id, id);
+        broadcastToAll({ type: 'LEAD_MUTATED', verticalId: lead.vertical_id, action: 'update', leadId: id });
+        logAudit(req, { action: 'lead.upload_photo', targetCollection: 'leads', targetId: id, after: { geotagPhotoKey: photoKey } });
+
+        return res.status(200).json({ success: true, data: updatedRes.rows[0] });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+    }
+};
+

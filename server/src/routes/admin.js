@@ -1,0 +1,47 @@
+import express from 'express';
+import {
+  getUsersBySubVertical,
+  getCustomFields,
+  createCustomField,
+  updateCustomField,
+  deleteCustomField,
+  reorderCustomFields,
+  getAdminAuditLogs,
+  getSubVerticalStages,
+  createSubVerticalStage,
+  updateSubVerticalStage,
+  deleteSubVerticalStage,
+  reorderSubVerticalStages,
+  getAdminDashboardStats
+} from '../controllers/admin.js';
+import authenticate from '../middleware/authenticate.js';
+import attachRole from '../middleware/attachRole.js';
+import checkPermission from '../middleware/checkPermission.js';
+
+const router = express.Router();
+
+router.use(authenticate);
+router.use(attachRole);
+
+// Sub-vertical custom fields CRUD
+router.get('/sub-verticals/:subVerticalId/custom-fields', checkPermission('vertical:read'), getCustomFields);
+router.post('/sub-verticals/:subVerticalId/custom-fields', checkPermission('sub_vertical:manage'), createCustomField);
+router.patch('/custom-fields/:id', checkPermission('sub_vertical:manage'), updateCustomField);
+router.delete('/custom-fields/:id', checkPermission('sub_vertical:manage'), deleteCustomField);
+router.patch('/sub-verticals/:subVerticalId/custom-fields/reorder', checkPermission('sub_vertical:manage'), reorderCustomFields);
+
+// Sub-vertical users
+router.get('/sub-verticals/:subVerticalId/users', checkPermission('vertical:read'), getUsersBySubVertical);
+
+// Sub-vertical workflow stages CRUD
+router.get('/sub-verticals/:subVerticalId/stages', checkPermission('vertical:read'), getSubVerticalStages);
+router.post('/sub-verticals/:subVerticalId/stages', checkPermission('sub_vertical:manage'), createSubVerticalStage);
+router.patch('/stages/:id', checkPermission('sub_vertical:manage'), updateSubVerticalStage);
+router.delete('/stages/:id', checkPermission('sub_vertical:manage'), deleteSubVerticalStage);
+router.patch('/sub-verticals/:subVerticalId/stages/reorder', checkPermission('sub_vertical:manage'), reorderSubVerticalStages);
+
+// Visual Admin Audit Logs
+router.get('/audit-logs', checkPermission('reports:read'), getAdminAuditLogs);
+router.get('/dashboard-stats', checkPermission('reports:read'), getAdminDashboardStats);
+
+export default router;

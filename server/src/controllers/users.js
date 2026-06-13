@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { query } from '../config/db.js';
 import { logAudit } from '../services/audit.js';
+import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 
 /**
  * GET /users
@@ -43,7 +44,36 @@ export const getUsers = async (req, res) => {
     }
 
     const usersRes = await query(sql, params);
-    return res.status(200).json({ success: true, data: usersRes.rows });
+    const users = usersRes.rows;
+
+    if (users.length > 0) {
+      const userIds = users.map(u => u.id);
+      const assignmentsRes = await query(`
+        SELECT ua.user_id, sv.id, sv.name, sv.slug, sv.vertical_id
+        FROM user_assignments ua
+        JOIN sub_verticals sv ON ua.sub_vertical_id = sv.id
+        WHERE ua.user_id = ANY($1) AND ua.is_active = true
+      `, [userIds]);
+
+      const assignmentsMap = {};
+      assignmentsRes.rows.forEach(row => {
+        if (!assignmentsMap[row.user_id]) {
+          assignmentsMap[row.user_id] = [];
+        }
+        assignmentsMap[row.user_id].push({
+          id: row.id,
+          name: row.name,
+          slug: row.slug,
+          verticalId: row.vertical_id
+        });
+      });
+
+      users.forEach(u => {
+        u.assignedSubVerticals = assignmentsMap[u.id] || [];
+      });
+    }
+
+    return res.status(200).json({ success: true, data: users });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
@@ -94,6 +124,8 @@ export const inviteUser = async (req, res) => {
       after: { name, email, role, verticalAccess }
     });
 
+    broadcastToAll({ type: 'USER_MUTATED' });
+
     return res.status(201).json({ success: true, data: newUser });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
@@ -127,6 +159,20 @@ export const getUserById = async (req, res) => {
         return res.status(403).json({ success: false, error: 'Forbidden' });
       }
     }
+
+    const assignmentsRes = await query(`
+      SELECT ua.user_id, sv.id, sv.name, sv.slug, sv.vertical_id
+      FROM user_assignments ua
+      JOIN sub_verticals sv ON ua.sub_vertical_id = sv.id
+      WHERE ua.user_id = $1 AND ua.is_active = true
+    `, [id]);
+
+    userDoc.assignedSubVerticals = assignmentsRes.rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      verticalId: row.vertical_id
+    }));
 
     return res.status(200).json({ success: true, data: userDoc });
   } catch (error) {
@@ -183,6 +229,8 @@ export const updateUser = async (req, res) => {
       after: updatedUser
     });
 
+    broadcastToAll({ type: 'USER_MUTATED' });
+
     return res.status(200).json({ success: true, data: updatedUser });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
@@ -234,6 +282,8 @@ export const changeUserRole = async (req, res) => {
       after: updatedUser
     });
 
+    broadcastToAll({ type: 'USER_MUTATED' });
+
     return res.status(200).json({ success: true, data: updatedUser });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
@@ -267,6 +317,8 @@ export const assignUserVerticals = async (req, res) => {
       after: updatedUser
     });
 
+    broadcastToAll({ type: 'USER_MUTATED' });
+
     return res.status(200).json({ success: true, data: updatedUser });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
@@ -278,38 +330,90 @@ export const assignUserVerticals = async (req, res) => {
  */
 export const deleteUser = async (req, res) => {
   const { id } = req.params;
+  const { hard } = req.query;
   try {
     const userRes = await query('SELECT * FROM users WHERE id = $1', [id]);
     if (userRes.rows.length === 0) {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
 
-    // Check if user has active leads assigned
-    const leadsRes = await query('SELECT COUNT(*) FROM leads WHERE assigned_to = $1 AND is_deleted = false', [id]);
-    const assignedLeadsCount = parseInt(leadsRes.rows[0].count, 10);
-    if (assignedLeadsCount > 0) {
-      return res.status(409).json({
-        success: false,
-        error: `Cannot deactivate user. User currently has ${assignedLeadsCount} active leads assigned.`
-      });
-    }
-
     const before = userRes.rows[0];
-    const updatedRes = await query(`
-      UPDATE users SET is_active = false, updated_at = NOW() 
-      WHERE id = $1 RETURNING *
-    `, [id]);
-    const updatedUser = updatedRes.rows[0];
 
-    await logAudit(req, {
-      action: 'user.deactivate',
-      targetCollection: 'users',
-      targetId: id,
-      before,
-      after: updatedUser
-    });
+    if (hard === 'true') {
+      // 1-3. Run checks concurrently to minimize DB round-trip overhead
+      const [leadsRes, uploadedRes, followUpsRes] = await Promise.all([
+        query('SELECT COUNT(*) FROM leads WHERE assigned_to = $1 AND is_deleted = false', [id]),
+        query('SELECT COUNT(*) FROM leads WHERE uploaded_by = $1', [id]),
+        query('SELECT COUNT(*) FROM follow_ups WHERE assigned_to_id = $1 OR created_by_id = $1', [id])
+      ]);
 
-    return res.status(200).json({ success: true, data: { message: 'User deactivated successfully' } });
+      const assignedLeadsCount = parseInt(leadsRes.rows[0].count, 10);
+      if (assignedLeadsCount > 0) {
+        return res.status(409).json({
+          success: false,
+          error: `Cannot delete user. User currently has ${assignedLeadsCount} active leads assigned.`
+        });
+      }
+
+      const uploadedLeadsCount = parseInt(uploadedRes.rows[0].count, 10);
+      if (uploadedLeadsCount > 0) {
+        return res.status(409).json({
+          success: false,
+          error: `Cannot delete user. User has uploaded ${uploadedLeadsCount} leads to the system.`
+        });
+      }
+
+      const followUpsCount = parseInt(followUpsRes.rows[0].count, 10);
+      if (followUpsCount > 0) {
+        return res.status(409).json({
+          success: false,
+          error: `Cannot delete user. User has ${followUpsCount} follow-ups associated with their account.`
+        });
+      }
+
+      // 4. Perform permanent deletion
+      await query('DELETE FROM users WHERE id = $1', [id]);
+
+      await logAudit(req, {
+        action: 'user.delete',
+        targetCollection: 'users',
+        targetId: id,
+        before,
+        after: null
+      });
+
+      broadcastToAll({ type: 'USER_MUTATED' });
+
+      return res.status(200).json({ success: true, data: { message: 'User deleted permanently' } });
+    } else {
+      // Soft deactivation (default)
+      const leadsRes = await query('SELECT COUNT(*) FROM leads WHERE assigned_to = $1 AND is_deleted = false', [id]);
+      const assignedLeadsCount = parseInt(leadsRes.rows[0].count, 10);
+      if (assignedLeadsCount > 0) {
+        return res.status(409).json({
+          success: false,
+          error: `Cannot deactivate user. User currently has ${assignedLeadsCount} active leads assigned.`
+        });
+      }
+
+      const updatedRes = await query(`
+        UPDATE users SET is_active = false, updated_at = NOW() 
+        WHERE id = $1 RETURNING *
+      `, [id]);
+      const updatedUser = updatedRes.rows[0];
+
+      await logAudit(req, {
+        action: 'user.deactivate',
+        targetCollection: 'users',
+        targetId: id,
+        before,
+        after: updatedUser
+      });
+
+      broadcastToAll({ type: 'USER_MUTATED' });
+
+      return res.status(200).json({ success: true, data: { message: 'User deactivated successfully' } });
+    }
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }

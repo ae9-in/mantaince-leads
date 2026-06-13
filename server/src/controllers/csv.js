@@ -25,7 +25,7 @@ export const downloadCsvTemplate = async (req, res) => {
     const configs = configsRes.rows;
 
     const baseHeaders = [
-      'Name', 'Number', 'Business', 'Employee', 'Spoken', 
+      'Name', 'Number', 'Business', 'Employee Spoken', 
       'Converted', 'Delivered', 'Location', 'Area', 'Link', 
       'Google Form', 'Google Drive'
     ];
@@ -51,6 +51,7 @@ export const uploadCsv = async (req, res) => {
   try {
     if (!file) return res.status(400).json({ success: false, error: 'CSV file is required' });
     if (!verticalId) return res.status(400).json({ success: false, error: 'verticalId is required' });
+    if (!subVerticalId) return res.status(400).json({ success: false, error: 'Sub-vertical selection is mandatory for uploading leads.' });
 
     // Strict Vertical Scoping check
     if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {

@@ -31,14 +31,22 @@ export const attachRole = async (req, res, next) => {
         name: cached.userDoc.role_name,
         permissions: cached.userDoc.permissions
       };
-      req.user.verticalAccess = cached.userDoc.vertical_access;
+      req.user.verticalAccess = cached.combinedAccess;
       return next();
     }
   }
 
   try {
     const userRes = await query(`
-      SELECT u.*, r.name as role_name, r.permissions 
+      SELECT u.*, r.name as role_name, r.permissions,
+             COALESCE(
+               ARRAY(
+                 SELECT DISTINCT sv.vertical_id::text
+                 FROM user_assignments ua
+                 JOIN sub_verticals sv ON ua.sub_vertical_id = sv.id
+                 WHERE ua.user_id = u.id AND ua.is_active = true
+               ), '{}'::text[]
+             ) AS assigned_verticals
       FROM users u 
       JOIN roles r ON u.role_id = r.id 
       WHERE u.id = $1
@@ -53,8 +61,14 @@ export const attachRole = async (req, res, next) => {
       });
     }
 
+    const combinedAccess = [...new Set([
+      ...(Array.isArray(userDoc.vertical_access) ? userDoc.vertical_access.map(v => String(v)) : []),
+      ...(Array.isArray(userDoc.assigned_verticals) ? userDoc.assigned_verticals.map(v => String(v)) : [])
+    ])];
+
     userCache.set(userId, {
       userDoc,
+      combinedAccess,
       expiresAt: now + CACHE_TTL
     });
 
@@ -71,7 +85,7 @@ export const attachRole = async (req, res, next) => {
     };
     
     // Also attach vertical access if not already in token payload
-    req.user.verticalAccess = userDoc.vertical_access;
+    req.user.verticalAccess = combinedAccess;
     
     next();
   } catch (error) {

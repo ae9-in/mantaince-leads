@@ -17,7 +17,14 @@ export function useRealtimeAssignments() {
           setAssignedSubVerticals(payload.assignments);
           toast.success('Your workspace assignments have been updated.', { icon: '🔄' });
         }
-      } else if (payload.type === 'LEAD_MUTATED') {
+      } else if (
+        payload.type === 'LEAD_MUTATED' ||
+        payload.type === 'STAGES_UPDATED' ||
+        payload.type === 'FOLLOWUP_CREATED' ||
+        payload.type === 'FOLLOWUP_UPDATED' ||
+        payload.type === 'USER_MUTATED' ||
+        payload.type === 'ASSIGNMENT_UPDATED'
+      ) {
         triggerLeadsRefresh();
       }
     } catch (e) {

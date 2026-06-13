@@ -3,7 +3,8 @@ import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import axios from '../api/axios.js';
 import { 
   Layers, ChevronRight, Plus, Check, X, ShieldAlert, Trash2, Edit2, 
-  HelpCircle, Eye, Settings, ListPlus, ToggleLeft, ToggleRight, ArrowUp, ArrowDown
+  HelpCircle, Eye, Settings, ListPlus, ToggleLeft, ToggleRight, ArrowUp, ArrowDown,
+  Upload
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -51,7 +52,21 @@ export const AdminVerticalsPage = () => {
   const [editColor, setEditColor] = useState('#c8956c');
   const [editIcon, setEditIcon] = useState('ti-folder');
   const [editActive, setEditActive] = useState(true);
+  const [statuses, setStatuses] = useState([]);
+  const [newStatusLabel, setNewStatusLabel] = useState('');
+  const [newStatusValue, setNewStatusValue] = useState('');
+  const [isStatusValueManuallyEdited, setIsStatusValueManuallyEdited] = useState(false);
   const [savingVertical, setSavingVertical] = useState(false);
+
+  // Quick Field modal states
+  const [quickFieldModalOpen, setQuickFieldModalOpen] = useState(false);
+  const [quickFieldSub, setQuickFieldSub] = useState(null);
+  const [quickFieldLabel, setQuickFieldLabel] = useState('');
+  const [quickFieldKey, setQuickFieldKey] = useState('');
+  const [quickFieldType, setQuickFieldType] = useState('TEXT');
+  const [quickFieldRequired, setQuickFieldRequired] = useState(false);
+  const [quickFieldOptionsStr, setQuickFieldOptionsStr] = useState('');
+  const [savingQuickField, setSavingQuickField] = useState(false);
 
   // Add Inline Vertical State
   const [showAddRow, setShowAddRow] = useState(false);
@@ -68,6 +83,11 @@ export const AdminVerticalsPage = () => {
   // Danger zone confirmation
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
+
+  // Upload states
+  const [uploadingLeads, setUploadingLeads] = useState(false);
+  const [uploadSub, setUploadSub] = useState(null);
+  const fileInputRef = React.useRef(null);
 
   const presetColors = [
     { label: 'Terracotta', value: '#c8956c' },
@@ -94,6 +114,16 @@ export const AdminVerticalsPage = () => {
     fetchVerticalsList();
   }, []);
 
+  // Auto-generate key from label for Quick Add Custom Field
+  useEffect(() => {
+    const key = quickFieldLabel
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/(^-|_$)/g, '');
+    setQuickFieldKey(key);
+  }, [quickFieldLabel]);
+
   const handleSelectVertical = async (vert) => {
     setSelectedVertical(vert);
     setSearchParams({ id: vert._id });
@@ -102,6 +132,7 @@ export const AdminVerticalsPage = () => {
     setEditColor(vert.color || '#c8956c');
     setEditIcon(vert.icon || 'ti-folder');
     setEditActive(vert.isActive);
+    setStatuses(vert.statuses || []);
     setDeleteConfirmText('');
 
     // Fetch sub-verticals and leads stats
@@ -151,7 +182,8 @@ export const AdminVerticalsPage = () => {
         description: editDescription,
         color: editColor,
         icon: editIcon,
-        isActive: editActive
+        isActive: editActive,
+        statuses
       });
       toast.success('Vertical updated successfully');
       await fetchVerticalsList();
@@ -160,6 +192,51 @@ export const AdminVerticalsPage = () => {
       toast.error(err.response?.data?.error || 'Failed to update vertical specifications');
     } finally {
       setSavingVertical(false);
+    }
+  };
+
+  const handleAddStatus = () => {
+    if (!newStatusLabel || !newStatusValue) return;
+    setStatuses([...statuses, { label: newStatusLabel, value: newStatusValue }]);
+    setNewStatusLabel('');
+    setNewStatusValue('');
+    setIsStatusValueManuallyEdited(false);
+  };
+
+  const handleDeleteStatus = (index) => {
+    setStatuses(statuses.filter((_, i) => i !== index));
+  };
+
+  const handleUploadCsv = async (event) => {
+    const file = event.target.files[0];
+    if (!file || !selectedVertical) return;
+
+    if (!uploadSub) {
+      toast.error('Please select a sub-vertical to upload leads to.');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('verticalId', selectedVertical._id);
+    formData.append('subVerticalId', uploadSub._id);
+
+    setUploadingLeads(true);
+    const toastId = toast.loading(`Uploading leads to ${uploadSub.name}...`);
+    try {
+      await axios.post('/api/v1/leads/csv/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      toast.success('Leads batch uploaded successfully!', { id: toastId });
+      // Refresh lead count
+      const countRes = await axios.get(`/api/v1/leads?verticalId=${selectedVertical._id}&limit=1`);
+      setLeadCount(countRes.data.meta?.total || 0);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'CSV upload failed', { id: toastId });
+    } finally {
+      setUploadingLeads(false);
+      setUploadSub(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -250,6 +327,38 @@ export const AdminVerticalsPage = () => {
       } catch (err) {
         toast.error(err.response?.data?.error || 'Delete rejected');
       }
+    }
+  };
+
+  const handleCreateQuickField = async (e) => {
+    e.preventDefault();
+    if (!quickFieldLabel.trim() || !quickFieldKey.trim() || !quickFieldSub) return;
+    setSavingQuickField(true);
+    
+    const typeUpper = quickFieldType.toUpperCase();
+    const optionsArray = (typeUpper === 'SELECT' || typeUpper === 'MULTISELECT')
+      ? quickFieldOptionsStr.split(',').map(s => s.trim()).filter(Boolean)
+      : [];
+
+    try {
+      await axios.post(`/api/v1/admin/sub-verticals/${quickFieldSub._id}/custom-fields`, {
+        label: quickFieldLabel,
+        fieldKey: quickFieldKey,
+        fieldType: quickFieldType.toLowerCase(),
+        isRequired: quickFieldRequired,
+        options: optionsArray
+      });
+      toast.success(`Field "${quickFieldLabel}" created successfully!`);
+      setQuickFieldLabel('');
+      setQuickFieldKey('');
+      setQuickFieldType('TEXT');
+      setQuickFieldRequired(false);
+      setQuickFieldOptionsStr('');
+      setQuickFieldModalOpen(false);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to create field');
+    } finally {
+      setSavingQuickField(false);
     }
   };
 
@@ -521,7 +630,81 @@ export const AdminVerticalsPage = () => {
               </div>
             </div>
 
-            <div className="flex justify-end pt-2 border-b border-[--border] pb-4">
+            {/* Lead Statuses configuration */}
+            <div className="bg-stone-50/50 p-5 rounded-xl border border-[--border] space-y-4 shadow-sm">
+              <div className="flex items-center justify-between border-b border-[--border] pb-3">
+                <h4 className="text-[11px] font-black text-[--text-primary] uppercase tracking-widest flex items-center gap-2">
+                  <ListPlus size={14} className="text-[--accent]" />
+                  <span>Configurable Lead Statuses</span>
+                </h4>
+                <span className="text-[9px] font-bold text-[--text-secondary] bg-white border border-[--border-strong] px-2 py-0.5 rounded-full">
+                  {statuses.length} Defined
+                </span>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {statuses.length === 0 ? (
+                  <p className="text-[10px] text-[--text-muted] italic">No custom statuses defined. Will fallback to global defaults.</p>
+                ) : (
+                  statuses.map((st, idx) => (
+                    <div key={idx} className="flex items-center gap-2 bg-white border border-stone-200 rounded-lg px-2.5 py-1.5 group hover:border-[--accent-border] transition-all">
+                      <span className="text-[11px] font-bold text-[--text-primary]">{st.label}</span>
+                      <span className="text-[9px] text-[--text-muted] font-mono">({st.value})</span>
+                      <button 
+                        type="button"
+                        onClick={() => handleDeleteStatus(idx)}
+                        className="text-stone-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-2">
+                <input
+                  type="text"
+                  placeholder="Label (e.g. New Lead)"
+                  value={newStatusLabel}
+                  onChange={(e) => {
+                    const labelVal = e.target.value;
+                    setNewStatusLabel(labelVal);
+                    if (!isStatusValueManuallyEdited) {
+                      setNewStatusValue(labelVal.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/(^-|_$)/g, ''));
+                    }
+                  }}
+                  className="bg-white border border-stone-200 rounded-lg px-3 py-2 text-[11px] focus:outline-none focus:border-[--accent]"
+                />
+                <input
+                  type="text"
+                  placeholder="Value (e.g. new_lead)"
+                  value={newStatusValue}
+                  onChange={(e) => {
+                    const val = e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+                    setNewStatusValue(val);
+                    setIsStatusValueManuallyEdited(val !== '');
+                  }}
+                  className="bg-white border border-stone-200 rounded-lg px-3 py-2 text-[11px] font-mono focus:outline-none focus:border-[--accent]"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddStatus}
+                  className="px-4 py-2 bg-stone-100 border border-stone-200 text-[--text-primary] font-bold uppercase text-[10px] rounded-lg hover:bg-stone-200 transition-all"
+                >
+                  Add Status
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2 border-b border-[--border] pb-4 gap-3">
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleUploadCsv} 
+                className="hidden" 
+                accept=".csv"
+              />
               <button
                 onClick={handleSaveVerticalDetails}
                 disabled={savingVertical}
@@ -601,7 +784,45 @@ export const AdminVerticalsPage = () => {
                         )}
 
                         {editingSubId !== sub._id && (
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setUploadSub(sub);
+                                fileInputRef.current?.click();
+                              }}
+                              className="px-1.5 py-0.5 border border-emerald-200 rounded text-emerald-600 hover:bg-emerald-50 transition-all bg-white flex items-center gap-0.5 font-bold"
+                              title="Upload Leads for this Category"
+                              style={{ fontSize: '9px' }}
+                            >
+                              <Upload size={9} />
+                              <span>Upload</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setQuickFieldSub(sub);
+                                setQuickFieldModalOpen(true);
+                              }}
+                              className="px-1.5 py-0.5 border border-[--accent-border] rounded text-[--accent] hover:bg-[--accent-light] transition-all bg-white flex items-center gap-0.5 font-bold"
+                              title="Add Field Directly"
+                              style={{ fontSize: '9px' }}
+                            >
+                              <Plus size={9} />
+                              <span>Field</span>
+                            </button>
+
+                            <Link
+                              to={`/admin/sub-verticals/${sub._id}/fields`}
+                              className="px-1.5 py-0.5 border border-[--border-strong] rounded text-[--text-secondary] hover:text-[--accent] hover:border-[--accent] transition-all bg-white hover:bg-stone-50 flex items-center gap-1"
+                              title="Configure Custom Fields"
+                              style={{ fontSize: '9px' }}
+                            >
+                              <Settings size={10} />
+                              <span className="font-bold">Fields</span>
+                            </Link>
+
                             <button
                               onClick={() => handleToggleSubActive(sub)}
                               className={`px-1.5 py-0.5 text-[9px] font-bold rounded uppercase border ${
@@ -683,6 +904,119 @@ export const AdminVerticalsPage = () => {
         )}
 
       </div>
+
+      {/* Quick Add Field Modal */}
+      {quickFieldModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-white rounded-xl shadow-2xl border border-[--border] overflow-hidden">
+            <div className="p-5 border-b border-[--border] flex items-center justify-between bg-stone-50 text-xs">
+              <div>
+                <h3 className="text-sm font-bold text-[--text-primary] uppercase tracking-wider">Quick Add Field</h3>
+                <p className="text-xs text-[--text-secondary] mt-0.5">
+                  Sub-vertical: <strong className="text-[--accent]">{quickFieldSub?.name}</strong>
+                </p>
+              </div>
+              <button 
+                onClick={() => setQuickFieldModalOpen(false)}
+                className="p-1.5 border border-[--border-strong] rounded-lg text-[--text-secondary] hover:text-[--text-primary] bg-white transition-all shadow-sm"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            
+            <form onSubmit={handleCreateQuickField} className="p-5 space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <label className="font-bold text-[--text-secondary] uppercase">Field Label</label>
+                  <input
+                    type="text"
+                    required
+                    value={quickFieldLabel}
+                    onChange={(e) => setQuickFieldLabel(e.target.value)}
+                    className="bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-[--text-primary] focus:outline-none focus:border-[--accent]"
+                    placeholder="e.g. Property SQFT"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="font-bold text-[--text-secondary] uppercase">Database Key</label>
+                  <input
+                    type="text"
+                    required
+                    readOnly
+                    value={quickFieldKey}
+                    className="bg-stone-50 border border-[--border] rounded-lg px-3 py-2 text-[--text-muted] font-mono outline-none cursor-not-allowed"
+                    placeholder="property_sqft"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="font-bold text-[--text-secondary] uppercase">Value Type</label>
+                <select
+                  value={quickFieldType}
+                  onChange={(e) => setQuickFieldType(e.target.value)}
+                  className="bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-[--text-primary] focus:outline-none focus:border-[--accent]"
+                >
+                  <option value="text">Plain Text</option>
+                  <option value="number">Number</option>
+                  <option value="phone">Phone Number</option>
+                  <option value="email">Email Address</option>
+                  <option value="url">URL Hyperlink</option>
+                  <option value="boolean">Boolean (Yes/No)</option>
+                  <option value="select">Dropdown Choice Menu (Select)</option>
+                  <option value="multiselect">Multi-select Menu</option>
+                  <option value="date">Date picker</option>
+                  <option value="textarea">Textarea Block</option>
+                </select>
+              </div>
+
+              {(quickFieldType.toLowerCase() === 'select' || quickFieldType.toLowerCase() === 'multiselect') && (
+                <div className="flex flex-col gap-1.5 bg-stone-50 p-3 rounded-lg border border-[--border]">
+                  <label className="font-bold text-[--accent] uppercase">Comma-separated Options</label>
+                  <input
+                    type="text"
+                    required
+                    value={quickFieldOptionsStr}
+                    onChange={(e) => setQuickFieldOptionsStr(e.target.value)}
+                    className="bg-white border border-[--accent-border] rounded-lg px-3 py-2 text-[--text-primary] focus:outline-none focus:border-[--accent]"
+                    placeholder="e.g. Small, Medium, Large"
+                  />
+                  <span className="text-[10px] text-[--text-secondary]">Input possible option values separated by commas.</span>
+                </div>
+              )}
+
+              <div className="bg-stone-50 p-3 rounded-lg border border-[--border]">
+                <label className="flex items-center gap-2 cursor-pointer select-none text-[--text-secondary] font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={quickFieldRequired}
+                    onChange={(e) => setQuickFieldRequired(e.target.checked)}
+                    className="rounded border-[--border-strong] bg-[--bg-input] text-[--accent] focus:ring-0 w-4 h-4"
+                  />
+                  <span>Is Required Field</span>
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-[--border]">
+                <button
+                  type="button"
+                  onClick={() => setQuickFieldModalOpen(false)}
+                  className="px-4 py-2 border border-[--border-strong] rounded-lg text-[--text-secondary] hover:bg-stone-50 font-semibold transition-all bg-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingQuickField}
+                  className="px-4 py-2 bg-[--accent] text-white font-black uppercase rounded-lg hover:bg-[--accent-hover] transition-all shadow-sm"
+                >
+                  {savingQuickField ? 'Creating...' : 'Create Field'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
     </div>
   );

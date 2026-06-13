@@ -15,24 +15,31 @@ const UserAssignmentPanel = ({ user, verticals, onClose, onSaveSuccess }) => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // Sub-verticals are already pre-embedded in the verticals prop
+        // Fetch sub-verticals for all verticals in parallel
+        const fetchPromises = verticals.map(v => 
+          axios.get(`/api/v1/verticals/${v.id || v._id}/sub-verticals`)
+            .then(res => ({ verticalId: v.id || v._id, subs: res.data.data || [] }))
+            .catch(() => ({ verticalId: v.id || v._id, subs: [] }))
+        );
+        const results = await Promise.all(fetchPromises);
         const subsMap = {};
-        verticals.forEach((v) => {
-          subsMap[v._id] = v.subVerticals || [];
+        results.forEach(r => {
+          subsMap[r.verticalId] = r.subs;
         });
         setSubVerticalsByVertical(subsMap);
 
         // Set initial assignments
         const initialData = user.assignedSubVerticals || [];
-        const initial = new Set(initialData.map(item => item._id || item));
+        const initial = new Set(initialData.map(item => item.id || item._id || item));
         setSavedAssignments(initial);
         setPendingAssignments(new Set(initial));
 
         // Auto-expand verticals that have assignments
         const expandMap = {};
         verticals.forEach(v => {
-          const hasAssignment = subsMap[v._id]?.some(sv => initial.has(sv._id));
-          if (hasAssignment) expandMap[v._id] = true;
+          const vertId = v.id || v._id;
+          const hasAssignment = subsMap[vertId]?.some(sv => initial.has(sv.id || sv._id || sv));
+          if (hasAssignment) expandMap[vertId] = true;
         });
         setExpandedVerticals(expandMap);
 
@@ -66,7 +73,7 @@ const UserAssignmentPanel = ({ user, verticals, onClose, onSaveSuccess }) => {
     setSaving(true);
     try {
       await axios.post('/api/v1/assignments/bulk', {
-        userId: user._id,
+        userId: user.id,
         subVerticalIds: Array.from(pendingAssignments)
       });
       toast.success('Assignments updated successfully');
@@ -108,17 +115,18 @@ const UserAssignmentPanel = ({ user, verticals, onClose, onSaveSuccess }) => {
             <span className="text-xs uppercase font-bold tracking-widest text-[--text-muted]">Mapping Structures...</span>
           </div>
         ) : verticals.map(vert => {
-          const subs = subVerticalsByVertical[vert._id] || [];
-          const isExpanded = expandedVerticals[vert._id];
-          const selectedCount = subs.filter(s => pendingAssignments.has(s._id)).length;
+          const vertId = vert.id || vert._id;
+          const subs = subVerticalsByVertical[vertId] || [];
+          const isExpanded = expandedVerticals[vertId];
+          const selectedCount = subs.filter(s => pendingAssignments.has(s.id || s._id)).length;
 
           return (
-            <div key={vert._id} className="border border-[--border] rounded-xl overflow-hidden bg-stone-50/50">
+            <div key={vertId} className="border border-[--border] rounded-xl overflow-hidden bg-stone-50/50">
               <div 
                 className={`p-3 flex items-center justify-between cursor-pointer hover:bg-stone-100 transition-all ${
                   isExpanded ? 'bg-stone-100/50' : ''
                 }`}
-                onClick={() => toggleExpand(vert._id)}
+                onClick={() => toggleExpand(vertId)}
               >
                 <div className="flex items-center gap-3">
                   <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: vert.color || 'var(--accent)' }} />
@@ -138,11 +146,11 @@ const UserAssignmentPanel = ({ user, verticals, onClose, onSaveSuccess }) => {
                     <div className="p-4 text-center text-[10px] text-[--text-secondary] uppercase font-bold italic">No sub-verticals defined</div>
                   ) : subs.map(sub => (
                     <label 
-                      key={sub._id} 
+                      key={sub.id || sub._id} 
                       className="flex items-center justify-between p-2.5 hover:bg-stone-50/50 cursor-pointer group transition-all"
                     >
                       <div className="flex flex-col">
-                        <span className={`text-sm transition-all ${pendingAssignments.has(sub._id) ? 'text-[--accent] font-bold' : 'text-[--text-primary]'}`}>
+                        <span className={`text-sm transition-all ${pendingAssignments.has(sub.id || sub._id) ? 'text-[--accent] font-bold' : 'text-[--text-primary]'}`}>
                           {sub.name}
                         </span>
                         <span className="text-[9px] text-[--text-muted] font-mono">{sub.slug}</span>
@@ -150,11 +158,11 @@ const UserAssignmentPanel = ({ user, verticals, onClose, onSaveSuccess }) => {
                       <div className="relative flex items-center">
                         <input
                           type="checkbox"
-                          checked={pendingAssignments.has(sub._id)}
-                          onChange={() => toggleAssignment(sub._id)}
+                          checked={pendingAssignments.has(sub.id || sub._id)}
+                          onChange={() => toggleAssignment(sub.id || sub._id)}
                           className="w-5 h-5 rounded border-[--border-strong] bg-[--bg-input] text-[--accent] focus:ring-0 cursor-pointer appearance-none checked:bg-[--accent-light] transition-all"
                         />
-                        {pendingAssignments.has(sub._id) && (
+                        {pendingAssignments.has(sub.id || sub._id) && (
                           <Check className="absolute pointer-events-none text-[--accent]" size={14} style={{ left: '3px' }} />
                         )}
                       </div>

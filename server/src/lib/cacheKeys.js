@@ -75,6 +75,8 @@ export function hashLeadListParams(params) {
         cursor:     params.cursor        ?? null,
         limit:      params.limit         ?? 25,
         csvBatchId: params.csvBatchId    ?? null,
+        stageId:    params.stageId       ?? null,
+        leadType:   params.leadType      ?? null,
         // RBAC dimension: agent only sees their own leads
         agentId:    params.agentId       ?? null,
     });

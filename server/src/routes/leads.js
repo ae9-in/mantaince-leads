@@ -8,7 +8,8 @@ import {
   deleteLead, 
   updateLeadStatus, 
   assignLead, 
-  exportLeadsCsv 
+  exportLeadsCsv,
+  uploadLeadPhoto
 } from '../controllers/leads.js';
 import {
   downloadCsvTemplate,
@@ -45,6 +46,7 @@ router.get('/export/csv', checkPermission(['leads:read', 'leads:read_own']), exp
 router.get('/:id', checkPermission(['leads:read', 'leads:read_own']), getLeadById);
 router.patch('/:id', checkPermission(['leads:update', 'leads:update_own']), updateLead);
 router.delete('/:id', checkPermission(['leads:delete', 'leads:delete_own']), deleteLead);
+router.post('/:id/photo', checkPermission(['leads:update', 'leads:update_own']), upload.single('photo'), uploadLeadPhoto);
 
 router.patch('/:id/status', checkPermission(['leads:update', 'leads:update_own']), updateLeadStatus);
 router.patch('/:id/assign', checkPermission('vertical:read'), assignLead);

@@ -65,8 +65,8 @@ export const AdminUsersPage = () => {
     setEditName(user.name);
     setEditEmail(user.email);
     setEditRole(user.roleId?.name || 'agent');
-    setEditActive(user.isActive);
-    setSelectedVerticalIds(user.verticalAccess?.map(v => v._id) || []);
+    setEditActive(user.is_active);
+    setSelectedVerticalIds(user.vertical_access?.map(v => v.id || v) || []);
   };
 
   const handleToggleVertical = (verticalId) => {
@@ -82,21 +82,21 @@ export const AdminUsersPage = () => {
     setSavingUser(true);
     try {
       // 1. Update basic info (name, email, isActive)
-      await axios.patch(`/api/v1/users/${selectedUser._id}`, {
+      await axios.patch(`/api/v1/users/${selectedUser.id}`, {
         name: editName,
         email: editEmail,
         isActive: editActive
       });
 
       // 2. Update vertical access
-      await axios.patch(`/api/v1/users/${selectedUser._id}/verticals`, {
+      await axios.patch(`/api/v1/users/${selectedUser.id}/verticals`, {
         verticalAccess: selectedVerticalIds
       });
 
       toast.success('User details updated successfully');
       await fetchUsersAndVerticals();
       // Reload details with fresh references
-      const updated = users.find(u => u._id === selectedUser._id);
+      const updated = users.find(u => u.id === selectedUser.id);
       if (updated) handleSelectUser(updated);
       setSelectedUser(null);
     } catch (err) {
@@ -108,7 +108,7 @@ export const AdminUsersPage = () => {
 
   // Change Role handles the sensitive modal launch
   const handleRoleChangeSelect = (newRole) => {
-    const currentRole = selectedUser.roleId?.name;
+    const currentRole = selectedUser.role_name;
     if (newRole !== currentRole) {
       setPendingRole(newRole);
       setShowConfirmRoleModal(true);
@@ -119,7 +119,7 @@ export const AdminUsersPage = () => {
     if (!selectedUser || !pendingRole) return;
     setSavingUser(true);
     try {
-      await axios.patch(`/api/v1/users/${selectedUser._id}/role`, {
+      await axios.patch(`/api/v1/users/${selectedUser.id}/role`, {
         role: pendingRole,
         adminPassword: confirmPassword
       });
@@ -149,12 +149,26 @@ export const AdminUsersPage = () => {
     if (!selectedUser) return;
     if (window.confirm(`Are you sure you want to deactivate ${selectedUser.name}?`)) {
       try {
-        await axios.delete(`/api/v1/users/${selectedUser._id}`);
+        await axios.delete(`/api/v1/users/${selectedUser.id}`);
         toast.success('User deactivated successfully');
         await fetchUsersAndVerticals();
         setSelectedUser(null);
       } catch (err) {
         toast.error(err.response?.data?.error || 'Failed to deactivate user account');
+      }
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!selectedUser) return;
+    if (window.confirm(`Are you sure you want to permanently delete ${selectedUser.name}? This action cannot be undone.`)) {
+      try {
+        await axios.delete(`/api/v1/users/${selectedUser.id}?hard=true`);
+        toast.success('User deleted permanently');
+        await fetchUsersAndVerticals();
+        setSelectedUser(null);
+      } catch (err) {
+        toast.error(err.response?.data?.error || 'Failed to delete user account');
       }
     }
   };
@@ -250,10 +264,10 @@ export const AdminUsersPage = () => {
                 ) : (
                   users.map(user => (
                     <tr 
-                      key={user._id} 
+                      key={user.id} 
                       onClick={() => handleSelectUser(user)}
                       className={`hover:bg-stone-50/50 cursor-pointer transition-all ${
-                        selectedUser?._id === user._id || assignmentUser?._id === user._id ? 'bg-[--accent-light]' : ''
+                        selectedUser?.id === user.id || assignmentUser?.id === user.id ? 'bg-[--accent-light]' : ''
                       }`}
                     >
                       <td className="px-6 py-4 text-[--text-primary] font-semibold">
@@ -263,8 +277,8 @@ export const AdminUsersPage = () => {
                         {user.email}
                       </td>
                       <td className="px-6 py-4">
-                        <span className={`inline-block px-2.5 py-0.5 text-[9px] font-mono font-bold uppercase border rounded-md ${getRoleBadgeStyle(user.roleId?.name)}`}>
-                          {user.roleId?.name?.replace('_', ' ')}
+                        <span className={`inline-block px-2.5 py-0.5 text-[9px] font-mono font-bold uppercase border rounded-md ${getRoleBadgeStyle(user.role_name)}`}>
+                          {user.role_name?.replace('_', ' ')}
                         </span>
                       </td>
                       <td className="px-6 py-4">
@@ -279,8 +293,8 @@ export const AdminUsersPage = () => {
                         </button>
                       </td>
                       <td className="px-6 py-4">
-                        <span className={`inline-block w-2 h-2 rounded-full ${user.isActive ? 'bg-[#2ecc71]' : 'bg-red-500'}`} />
-                        <span className="text-xs ml-1.5 font-semibold text-[--text-primary]">{user.isActive ? 'Active' : 'Inactive'}</span>
+                        <span className={`inline-block w-2 h-2 rounded-full ${user.is_active ? 'bg-[#2ecc71]' : 'bg-red-500'}`} />
+                        <span className="text-xs ml-1.5 font-semibold text-[--text-primary]">{user.is_active ? 'Active' : 'Inactive'}</span>
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-3">
@@ -378,13 +392,13 @@ export const AdminUsersPage = () => {
                     <label className="font-bold text-[--text-secondary] uppercase block">Vertical Access Groups</label>
                     <div className="border border-[--border] rounded-lg p-3 max-h-[160px] overflow-y-auto space-y-2 bg-[--bg-input]">
                       {verticals.map(vert => {
-                        const checked = selectedVerticalIds.includes(vert._id);
+                        const checked = selectedVerticalIds.includes(vert.id);
                         return (
-                          <label key={vert._id} className="flex items-center gap-2 cursor-pointer select-none text-[--text-secondary] hover:text-[--text-primary]">
+                          <label key={vert.id} className="flex items-center gap-2 cursor-pointer select-none text-[--text-secondary] hover:text-[--text-primary]">
                             <input
                               type="checkbox"
                               checked={checked}
-                              onChange={() => handleToggleVertical(vert._id)}
+                              onChange={() => handleToggleVertical(vert.id)}
                               className="rounded border-[--border-strong] bg-[--bg-input] text-[--accent] focus:ring-0 focus:ring-offset-0"
                             />
                             <span>{vert.name}</span>
@@ -423,6 +437,14 @@ export const AdminUsersPage = () => {
               >
                 <Trash2 size={12} />
                 <span>Deactivate Operator</span>
+              </button>
+
+              <button
+                onClick={handleDeleteUser}
+                className="w-full py-2 bg-red-600 hover:bg-red-700 text-white font-semibold text-xs rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-sm"
+              >
+                <Trash2 size={12} />
+                <span>Delete Operator</span>
               </button>
             </div>
 
@@ -518,17 +540,17 @@ export const AdminUsersPage = () => {
                   <label className="font-bold text-[--text-secondary] uppercase block">Assign Vertical Access</label>
                   <div className="border border-[--border] rounded-lg p-2.5 max-h-[120px] overflow-y-auto space-y-2 bg-[--bg-input]">
                     {verticals.map(vert => {
-                      const checked = inviteVerticals.includes(vert._id);
+                      const checked = inviteVerticals.includes(vert.id);
                       return (
-                        <label key={vert._id} className="flex items-center gap-2 cursor-pointer select-none text-[--text-secondary]">
+                        <label key={vert.id} className="flex items-center gap-2 cursor-pointer select-none text-[--text-secondary]">
                           <input
                             type="checkbox"
                             checked={checked}
                             onChange={() => {
                               if (checked) {
-                                setInviteVerticals(inviteVerticals.filter(id => id !== vert._id));
+                                setInviteVerticals(inviteVerticals.filter(id => id !== vert.id));
                               } else {
-                                setInviteVerticals([...inviteVerticals, vert._id]);
+                                setInviteVerticals([...inviteVerticals, vert.id]);
                               }
                             }}
                             className="rounded border-[--border-strong] bg-[--bg-input] text-[--accent] focus:ring-0 focus:ring-offset-0"

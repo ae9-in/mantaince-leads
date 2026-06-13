@@ -38,7 +38,7 @@ const sanitizePhone = (phone) => {
  * @param {string} batchId  - csv_batch_id FK
  * @returns {{ sql: string, params: Array }}
  */
-function buildBulkInsertSql(rows, verticalId, subVerticalId, assignedTo, uploadedBy, batchId) {
+function buildBulkInsertSql(rows, verticalId, subVerticalId, defaultAssignedTo, uploadedBy, batchId) {
     const COLS_PER_ROW = 10;
     const colNames = [
         'id', 'vertical_id', 'sub_vertical_id', 'assigned_to',
@@ -60,7 +60,7 @@ function buildBulkInsertSql(rows, verticalId, subVerticalId, assignedTo, uploade
             crypto.randomUUID(),
             verticalId,
             subVerticalId || null,
-            assignedTo    || null,
+            row.assignedTo || defaultAssignedTo || null,
             uploadedBy,
             row.name,
             row.phone,
@@ -118,6 +118,13 @@ export const processCsvJob = async (job) => {
             [verticalId]
         );
         const configs = configsRes.rows;
+
+        // 2.5 Load agents for this vertical to map "employee spoken" to assigned_to
+        const agentsRes = await query(
+            'SELECT id, name FROM users WHERE $1 = ANY(vertical_access)',
+            [verticalId]
+        );
+        const agentMap = new Map(agentsRes.rows.map(a => [a.name.toLowerCase().trim(), a.id]));
 
         // 3. Extract unique phone numbers from the parsed CSV to query surgically
         const csvPhones = [];
@@ -187,10 +194,14 @@ export const processCsvJob = async (job) => {
             // Map base dynamic fields first (defaulting to empty string if missing)
             dataMap['nameBusiness'] = row['name business'] || row['namebusiness'] || '';
             dataMap['date'] = row['date'] || '';
-            dataMap['employeeSpoken'] = row['employee spoken'] || row['employee'] || row['spoken'] || '';
+            const empSpokenRaw = row['employee spoken'] || row['employee'] || row['spoken'] || '';
+            dataMap['employeeSpoken'] = empSpokenRaw;
             dataMap['convertedStatus'] = row['converted status'] || row['converted'] || '';
             dataMap['deliveredLocation'] = row['delivered location'] || row['delivered'] || row['location'] || row['area'] || '';
             dataMap['deliveredLink'] = row['delivered link'] || row['link'] || '';
+
+            const empSpokenName = empSpokenRaw.toLowerCase().trim();
+            const rowAssignedTo = agentMap.get(empSpokenName) || null;
 
             for (const cfg of configs) {
                 const header = (cfg.csv_header || cfg.label).toLowerCase().trim();
@@ -208,6 +219,7 @@ export const processCsvJob = async (job) => {
             validLeads.push({
                 name: rawName, phone: rawPhone,
                 businessName: rawBusiness, data: dataMap,
+                assignedTo: rowAssignedTo
             });
 
             // Add to dedup set immediately so later rows in the same file are caught

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { 
   Layers, Users, Settings, LogOut, ChevronDown, 
-  Menu, X, Bell, BarChart3, ChevronRight, FileSpreadsheet
+  Menu, X, Bell, BarChart3, ChevronRight, FileSpreadsheet, Calendar, ClipboardList, TrendingUp
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore.js';
 import { useUiStore } from '../store/uiStore.js';
@@ -107,8 +107,11 @@ export const AppLayout = () => {
       const m = assignedSubVerticals.find(s => s._id === subId);
       if (!m) return;
       if (!snap.current.activeSubVertical || snap.current.activeSubVertical._id !== m._id) setActiveSubVertical(m);
-      const pv = m.verticalId;
-      if (pv && (!snap.current.activeVertical || snap.current.activeVertical._id !== pv._id)) setActiveVertical(pv);
+      const pvId = m.verticalId;
+      const matchedVert = verticals.find(v => v._id === pvId);
+      if (matchedVert && (!snap.current.activeVertical || snap.current.activeVertical._id !== matchedVert._id)) {
+        setActiveVertical(matchedVert);
+      }
       return;
     }
 
@@ -203,7 +206,9 @@ export const AppLayout = () => {
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-0.5">
           {navLink('/leads', Layers, 'Leads', false)}
-          {navLink('/reports', BarChart3, 'Reports', true)}
+          {navLink('/calendar', Calendar, 'Calendar', true)}
+          {navLink('/follow-ups', ClipboardList, 'Follow-ups', true)}
+          {isAdmin && navLink('/reports', BarChart3, 'Reports', true)}
 
           {isAdmin && (
             <div className="pt-4 mt-3 border-t space-y-0.5" style={{ borderColor: 'var(--border)' }}>
@@ -212,6 +217,7 @@ export const AppLayout = () => {
                   Administration
                 </p>
               )}
+              {navLink('/admin/dashboard', TrendingUp, 'Admin Dashboard', true)}
               {navLink('/admin/users', Users, 'User Accounts', true)}
               {navLink('/admin/verticals', Settings, 'Verticals & Fields', false)}
             </div>
@@ -281,11 +287,13 @@ export const AppLayout = () => {
               <span className="font-black text-sm" style={{ color: 'var(--text-primary)' }}>LeadsBase</span>
               <button onClick={() => setMobileOpen(false)} style={{ color: 'var(--text-muted)' }}><X size={18} /></button>
             </div>
-            <nav className="flex-1 space-y-0.5 text-sm">
+            <nav className="flex-1 space-y-0.5 text-sm overflow-y-auto">
               {[
                 ['/leads', Layers, 'Leads'],
-                ['/reports', BarChart3, 'Reports'],
-              ].map(([to, Icon, label]) => (
+                ['/calendar', Calendar, 'Calendar'],
+                ['/follow-ups', ClipboardList, 'Follow-ups'],
+                isAdmin ? ['/reports', BarChart3, 'Reports'] : null,
+              ].filter(Boolean).map(([to, Icon, label]) => (
                 <Link key={to} to={to} onClick={() => setMobileOpen(false)}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-all ${
                     location.pathname.startsWith(to) ? 'bg-[--accent-light] text-[--accent]' : 'text-[--text-secondary] hover:bg-stone-100'
@@ -293,6 +301,45 @@ export const AppLayout = () => {
                   <Icon size={16} /><span>{label}</span>
                 </Link>
               ))}
+
+              {user?.role === 'agent' && assignedSubVerticals.length > 0 && (
+                <div className="pt-4 mt-3 border-t space-y-0.5" style={{ borderColor: 'var(--border)' }}>
+                  <p className="px-3 mb-2 text-[9px] uppercase tracking-widest font-bold text-[--text-muted]">
+                    My Areas
+                  </p>
+                  {assignedSubVerticals.map(sub => (
+                    <Link key={sub._id} to={`/leads?subVerticalId=${sub._id}`} onClick={() => setMobileOpen(false)}
+                      className={`flex items-center gap-2 px-3 py-2 text-xs rounded-lg transition-all font-medium ${
+                        activeSubVertical?._id === sub._id
+                          ? 'bg-[--accent-light] text-[--accent]'
+                          : 'text-[--text-secondary] hover:bg-stone-100'
+                      }`}>
+                      <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: sub.verticalId?.color || 'var(--accent)' }} />
+                      <span className="truncate">{sub.name}</span>
+                    </Link>
+                  ))}
+                </div>
+              )}
+
+              {isAdmin && (
+                <div className="pt-4 mt-3 border-t space-y-0.5" style={{ borderColor: 'var(--border)' }}>
+                  <p className="px-3 mb-2 text-[9px] uppercase tracking-widest font-bold text-[--text-muted]">
+                    Administration
+                  </p>
+                  {[
+                    ['/admin/dashboard', TrendingUp, 'Admin Dashboard'],
+                    ['/admin/users', Users, 'User Accounts'],
+                    ['/admin/verticals', Settings, 'Verticals & Fields'],
+                  ].map(([to, Icon, label]) => (
+                    <Link key={to} to={to} onClick={() => setMobileOpen(false)}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-all ${
+                        location.pathname.startsWith(to) ? 'bg-[--accent-light] text-[--accent]' : 'text-[--text-secondary] hover:bg-stone-100'
+                      }`}>
+                      <Icon size={16} /><span>{label}</span>
+                    </Link>
+                  ))}
+                </div>
+              )}
             </nav>
             <button onClick={handleLogout}
               className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold mt-auto transition-all"
@@ -310,7 +357,7 @@ export const AppLayout = () => {
         <header className="flex items-center justify-between px-6 py-3 border-b"
           style={{ background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(12px)', borderColor: 'var(--border)' }}>
           <div className="flex items-center gap-4">
-            <button onClick={() => setMobileOpen(true)} className="md:hidden" style={{ color: 'var(--text-muted)' }}>
+            <button onClick={() => setMobileOpen(true)} className="md:hidden" data-testid="hamburger-btn" style={{ color: 'var(--text-muted)' }}>
               <Menu size={20} />
             </button>
             {activeSubVertical ? (

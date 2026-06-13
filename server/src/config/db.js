@@ -145,6 +145,15 @@ const runMigrations = async () => {
             CONSTRAINT unique_vertical_slug UNIQUE (vertical_id, slug)
         );
 
+        CREATE TABLE IF NOT EXISTS lead_stages (
+            id UUID PRIMARY KEY,
+            sub_vertical_id UUID NOT NULL REFERENCES sub_verticals(id) ON DELETE CASCADE,
+            name VARCHAR(255) NOT NULL,
+            display_order INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
         CREATE TABLE IF NOT EXISTS field_configs (
             id UUID PRIMARY KEY,
             vertical_id UUID NOT NULL REFERENCES verticals(id) ON DELETE CASCADE,
@@ -157,6 +166,8 @@ const runMigrations = async () => {
             csv_header VARCHAR(255),
             display_order INTEGER DEFAULT 0,
             is_visible BOOLEAN DEFAULT TRUE,
+            is_active BOOLEAN DEFAULT TRUE,
+            is_table_column BOOLEAN DEFAULT TRUE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             CONSTRAINT unique_vertical_field_key UNIQUE (vertical_id, field_key)
@@ -197,18 +208,58 @@ const runMigrations = async () => {
             deleted_by UUID REFERENCES users(id) ON DELETE SET NULL,
             search_vector TSVECTOR,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            stage_id UUID REFERENCES lead_stages(id) ON DELETE SET NULL
         );
 
         CREATE TABLE IF NOT EXISTS user_assignments (
             id UUID PRIMARY KEY,
             user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-            vertical_id UUID REFERENCES verticals(id) ON DELETE CASCADE,
+            sub_vertical_id UUID REFERENCES sub_verticals(id) ON DELETE CASCADE,
+            assigned_by UUID REFERENCES users(id) ON DELETE SET NULL,
             is_active BOOLEAN DEFAULT TRUE,
-            last_assigned_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(user_id, vertical_id)
+            UNIQUE(user_id, sub_vertical_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS custom_fields (
+            id VARCHAR(50) PRIMARY KEY,
+            sub_vertical_id UUID NOT NULL REFERENCES sub_verticals(id) ON DELETE CASCADE,
+            label VARCHAR(255) NOT NULL,
+            field_key VARCHAR(255) NOT NULL,
+            field_type VARCHAR(50) DEFAULT 'TEXT',
+            is_required BOOLEAN DEFAULT FALSE,
+            placeholder VARCHAR(255),
+            options TEXT[] DEFAULT '{}',
+            "order" INTEGER DEFAULT 0,
+            is_active BOOLEAN DEFAULT TRUE,
+            is_deleted BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT unique_sub_vertical_field_key UNIQUE (sub_vertical_id, field_key)
+        );
+
+        CREATE TABLE IF NOT EXISTS lead_custom_values (
+            id VARCHAR(50) PRIMARY KEY,
+            lead_id UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+            custom_field_id VARCHAR(50) REFERENCES custom_fields(id) ON DELETE CASCADE,
+            value TEXT NOT NULL,
+            CONSTRAINT unique_lead_custom_field UNIQUE (lead_id, custom_field_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS follow_ups (
+            id VARCHAR(50) PRIMARY KEY,
+            lead_id UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+            sub_vertical_id UUID NOT NULL REFERENCES sub_verticals(id) ON DELETE CASCADE,
+            assigned_to_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+            created_by_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+            follow_up_date TIMESTAMP NOT NULL,
+            description TEXT NOT NULL,
+            status VARCHAR(50) DEFAULT 'PENDING',
+            completed_at TIMESTAMP,
+            completed_note TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS sessions (
@@ -222,17 +273,82 @@ const runMigrations = async () => {
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
-        CREATE TABLE IF NOT EXISTS audit_logs (
-            id UUID PRIMARY KEY,
-            actor_id UUID REFERENCES users(id) ON DELETE CASCADE,
-            action VARCHAR(255) NOT NULL,
-            target_collection VARCHAR(255) NOT NULL,
-            target_id UUID,
-            diff JSONB,
-            ip VARCHAR(50),
-            execution_time_ms INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
+        DO $$
+        BEGIN
+            -- Check if audit_logs table exists and is NOT partitioned
+            IF EXISTS (
+                SELECT 1 FROM information_schema.tables 
+                WHERE table_name = 'audit_logs'
+            ) AND NOT EXISTS (
+                SELECT 1 FROM pg_partitioned_table p
+                JOIN pg_class c ON p.partrelid = c.oid
+                WHERE c.relname = 'audit_logs'
+            ) THEN
+                -- Rename existing table
+                ALTER TABLE audit_logs RENAME TO audit_logs_old;
+                
+                -- Create partitioned table
+                CREATE TABLE audit_logs (
+                    id UUID NOT NULL,
+                    actor_id UUID REFERENCES users(id) ON DELETE CASCADE,
+                    action VARCHAR(255) NOT NULL,
+                    target_collection VARCHAR(255) NOT NULL,
+                    target_id UUID,
+                    diff JSONB,
+                    ip VARCHAR(50),
+                    execution_time_ms INTEGER,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (id, created_at)
+                ) PARTITION BY RANGE (created_at);
+                
+                -- Create default partition
+                CREATE TABLE audit_logs_default PARTITION OF audit_logs DEFAULT;
+                
+                -- Create specific partitions for 2026
+                CREATE TABLE IF NOT EXISTS audit_logs_y2026m06 PARTITION OF audit_logs
+                    FOR VALUES FROM ('2026-06-01 00:00:00') TO ('2026-07-01 00:00:00');
+                CREATE TABLE IF NOT EXISTS audit_logs_y2026m07 PARTITION OF audit_logs
+                    FOR VALUES FROM ('2026-07-01 00:00:00') TO ('2026-08-01 00:00:00');
+                CREATE TABLE IF NOT EXISTS audit_logs_y2026m08 PARTITION OF audit_logs
+                    FOR VALUES FROM ('2026-08-01 00:00:00') TO ('2026-09-01 00:00:00');
+                    
+                -- Copy data from old table to new partitioned table
+                INSERT INTO audit_logs (id, actor_id, action, target_collection, target_id, diff, ip, execution_time_ms, created_at)
+                SELECT id, actor_id, action, target_collection, target_id, diff, ip, execution_time_ms, created_at
+                FROM audit_logs_old;
+                
+                -- Drop old table
+                DROP TABLE audit_logs_old;
+            ELSIF NOT EXISTS (
+                SELECT 1 FROM information_schema.tables 
+                WHERE table_name = 'audit_logs'
+            ) THEN
+                -- Create partitioned table directly if it doesn't exist
+                CREATE TABLE audit_logs (
+                    id UUID NOT NULL,
+                    actor_id UUID REFERENCES users(id) ON DELETE CASCADE,
+                    action VARCHAR(255) NOT NULL,
+                    target_collection VARCHAR(255) NOT NULL,
+                    target_id UUID,
+                    diff JSONB,
+                    ip VARCHAR(50),
+                    execution_time_ms INTEGER,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (id, created_at)
+                ) PARTITION BY RANGE (created_at);
+                
+                -- Create default partition
+                CREATE TABLE audit_logs_default PARTITION OF audit_logs DEFAULT;
+                
+                -- Create specific partitions for 2026
+                CREATE TABLE IF NOT EXISTS audit_logs_y2026m06 PARTITION OF audit_logs
+                    FOR VALUES FROM ('2026-06-01 00:00:00') TO ('2026-07-01 00:00:00');
+                CREATE TABLE IF NOT EXISTS audit_logs_y2026m07 PARTITION OF audit_logs
+                    FOR VALUES FROM ('2026-07-01 00:00:00') TO ('2026-08-01 00:00:00');
+                CREATE TABLE IF NOT EXISTS audit_logs_y2026m08 PARTITION OF audit_logs
+                    FOR VALUES FROM ('2026-08-01 00:00:00') TO ('2026-09-01 00:00:00');
+            END IF;
+        END $$;
 
         -- Ensure additive columns exist (idempotent)
         ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP;
@@ -250,7 +366,13 @@ const runMigrations = async () => {
         ALTER TABLE verticals ADD COLUMN IF NOT EXISTS color VARCHAR(50) DEFAULT '#185FA5';
         ALTER TABLE verticals ADD COLUMN IF NOT EXISTS icon VARCHAR(50) DEFAULT 'Layers';
         ALTER TABLE verticals ADD COLUMN IF NOT EXISTS display_order INTEGER DEFAULT 0;
+        ALTER TABLE verticals ADD COLUMN IF NOT EXISTS statuses JSONB DEFAULT '[]';
         ALTER TABLE sub_verticals ADD COLUMN IF NOT EXISTS display_order INTEGER DEFAULT 0;
+        ALTER TABLE lead_stages ADD COLUMN IF NOT EXISTS display_order INTEGER DEFAULT 0;
+
+        ALTER TABLE field_configs ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
+        ALTER TABLE field_configs ADD COLUMN IF NOT EXISTS is_table_column BOOLEAN DEFAULT TRUE;
+        ALTER TABLE custom_fields ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;
 
         ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS execution_time_ms INTEGER;
 
@@ -262,6 +384,38 @@ const runMigrations = async () => {
 
         -- FTS column (idempotent)
         ALTER TABLE leads ADD COLUMN IF NOT EXISTS search_vector TSVECTOR;
+
+        -- Additive columns for leads table
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_type VARCHAR(50) NOT NULL DEFAULT 'CALL';
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS geotag_lat DOUBLE PRECISION;
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS geotag_lng DOUBLE PRECISION;
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS geotag_accuracy DOUBLE PRECISION;
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS geotag_photo_key TEXT;
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS geotag_address TEXT;
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS geotag_captured_at TIMESTAMP;
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS stage_id UUID REFERENCES lead_stages(id) ON DELETE SET NULL;
+
+        -- Migrate user_assignments from vertical_id to sub_vertical_id if vertical_id column exists
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'user_assignments' AND column_name = 'vertical_id'
+            ) THEN
+                -- Drop the unique constraint first
+                ALTER TABLE user_assignments DROP CONSTRAINT IF EXISTS user_assignments_user_id_vertical_id_key;
+                
+                -- Add new columns if they do not exist
+                ALTER TABLE user_assignments ADD COLUMN IF NOT EXISTS sub_vertical_id UUID REFERENCES sub_verticals(id) ON DELETE CASCADE;
+                ALTER TABLE user_assignments ADD COLUMN IF NOT EXISTS assigned_by UUID REFERENCES users(id) ON DELETE SET NULL;
+                
+                -- Drop column vertical_id
+                ALTER TABLE user_assignments DROP COLUMN IF EXISTS vertical_id;
+                
+                -- Add new unique constraint
+                ALTER TABLE user_assignments ADD CONSTRAINT user_assignments_user_id_sub_vertical_id_key UNIQUE (user_id, sub_vertical_id);
+            END IF;
+        END $$;
     `;
 
     // ── Phase 2: Performance Indexes ─────────────────────────────────────────
@@ -302,6 +456,17 @@ const runMigrations = async () => {
         -- BRIN INDEX: Date-range queries on created_at — 100× smaller than B-tree.
         -- Effective because leads are inserted in approximately chronological order.
         CREATE INDEX IF NOT EXISTS idx_leads_created_brin ON leads USING BRIN (created_at);
+
+        -- Performance indexes for new tables
+        CREATE INDEX IF NOT EXISTS idx_custom_fields_sub_vertical_order ON custom_fields (sub_vertical_id, is_active, "order");
+        CREATE INDEX IF NOT EXISTS idx_lead_custom_values_lead_id ON lead_custom_values (lead_id);
+        CREATE INDEX IF NOT EXISTS idx_follow_ups_lead_date ON follow_ups (lead_id, follow_up_date);
+        CREATE INDEX IF NOT EXISTS idx_follow_ups_sub_vertical_date ON follow_ups (sub_vertical_id, follow_up_date);
+        CREATE INDEX IF NOT EXISTS idx_follow_ups_assigned_status_date ON follow_ups (assigned_to_id, status, follow_up_date);
+        CREATE INDEX IF NOT EXISTS idx_follow_ups_date ON follow_ups (follow_up_date);
+        CREATE INDEX IF NOT EXISTS idx_leads_lead_type ON leads (lead_type, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_lead_stages_sub_vertical ON lead_stages (sub_vertical_id, display_order);
+        CREATE INDEX IF NOT EXISTS idx_leads_stage_id ON leads (stage_id);
 
         -- Statistics: help query planner on low-cardinality status/source columns
         ALTER TABLE leads ALTER COLUMN status SET STATISTICS 500;

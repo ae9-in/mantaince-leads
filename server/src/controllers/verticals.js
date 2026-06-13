@@ -45,7 +45,7 @@ export const getVerticals = async (req, res) => {
  * POST /verticals
  */
 export const createVertical = async (req, res) => {
-    const { name, description, color, icon } = req.body;
+    const { name, description, color, icon, statuses } = req.body;
     try {
         const slug = generateSlug(name);
 
@@ -59,13 +59,25 @@ export const createVertical = async (req, res) => {
             return res.status(400).json({ success: false, error: 'A vertical with this name slug already exists' });
         }
 
+        const defaultStatuses = [
+            { value: 'new', label: 'New' },
+            { value: 'contacted', label: 'Contacted' },
+            { value: 'qualified', label: 'Qualified' },
+            { value: 'visit_scheduled', label: 'Meeting Scheduled' },
+            { value: 'visit_completed', label: 'Meeting Completed' },
+            { value: 'negotiation', label: 'Negotiation' },
+            { value: 'converted', label: 'Converted' },
+            { value: 'lost', label: 'Lost' },
+            { value: 'invalid', label: 'Invalid' },
+        ];
+
         const displayOrder = parseInt(maxOrderRes.rows[0].max, 10) + 1;
         const verticalId   = crypto.randomUUID();
         const verticalRes  = await query(`
-            INSERT INTO verticals (id, name, slug, description, color, icon, display_order, created_by)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO verticals (id, name, slug, description, color, icon, display_order, created_by, statuses)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING *
-        `, [verticalId, name, slug, description || '', color || '#185FA5', icon || 'Layers', displayOrder, req.user.sub]);
+        `, [verticalId, name, slug, description || '', color || '#185FA5', icon || 'Layers', displayOrder, req.user.sub, JSON.stringify(statuses || defaultStatuses)]);
 
         const vertical = verticalRes.rows[0];
 
@@ -122,7 +134,7 @@ export const getVerticalById = async (req, res) => {
  */
 export const updateVertical = async (req, res) => {
     const { id } = req.params;
-    const { name, description, color, icon, isActive } = req.body;
+    const { name, description, color, icon, isActive, statuses } = req.body;
     try {
         const verticalRes = await query('SELECT * FROM verticals WHERE id = $1', [id]);
         const vertical    = verticalRes.rows[0];
@@ -143,6 +155,7 @@ export const updateVertical = async (req, res) => {
         if (color)                      { setClauses.push(`color = $${pIdx++}`);       params.push(color); }
         if (icon)                       { setClauses.push(`icon = $${pIdx++}`);        params.push(icon); }
         if (isActive !== undefined)     { setClauses.push(`is_active = $${pIdx++}`);   params.push(isActive); }
+        if (statuses !== undefined)     { setClauses.push(`statuses = $${pIdx++}`);    params.push(JSON.stringify(statuses)); }
 
         if (setClauses.length === 0) {
             return res.status(200).json({ success: true, data: vertical });
@@ -170,16 +183,15 @@ export const updateVertical = async (req, res) => {
 export const deleteVertical = async (req, res) => {
     const { id } = req.params;
     try {
-        // Parallel: check for leads + fetch vertical simultaneously
-        const [leadsRes, verticalRes] = await Promise.all([
-            query('SELECT COUNT(*) FROM leads WHERE vertical_id = $1 AND is_deleted = false', [id]),
-            query('DELETE FROM verticals WHERE id = $1 RETURNING *', [id]),
-        ]);
+        // First check for active leads linked to the vertical
+        const leadsRes = await query('SELECT COUNT(*) FROM leads WHERE vertical_id = $1 AND is_deleted = false', [id]);
 
         if (parseInt(leadsRes.rows[0].count, 10) > 0) {
             return res.status(409).json({ success: false, error: 'Cannot delete vertical. Active leads are linked to it.' });
         }
 
+        // Only delete if no active leads are linked
+        const verticalRes = await query('DELETE FROM verticals WHERE id = $1 RETURNING *', [id]);
         const vertical = verticalRes.rows[0];
         if (!vertical) {
             return res.status(404).json({ success: false, error: 'Vertical not found' });
@@ -277,10 +289,15 @@ export const createSubVertical = async (req, res) => {
 
         const slug = generateSlug(name);
 
-        const maxOrderRes = await query(
-            'SELECT COALESCE(MAX(display_order), 0) AS max FROM sub_verticals WHERE vertical_id = $1',
-            [verticalId]
-        );
+        const [existsRes, maxOrderRes] = await Promise.all([
+            query('SELECT id FROM sub_verticals WHERE vertical_id = $1 AND slug = $2', [verticalId, slug]),
+            query('SELECT COALESCE(MAX(display_order), 0) AS max FROM sub_verticals WHERE vertical_id = $1', [verticalId])
+        ]);
+
+        if (existsRes.rows.length > 0) {
+            return res.status(400).json({ success: false, error: 'A sub-vertical with this name slug already exists in this vertical' });
+        }
+
         const displayOrder = parseInt(maxOrderRes.rows[0].max, 10) + 1;
 
         const subId  = crypto.randomUUID();

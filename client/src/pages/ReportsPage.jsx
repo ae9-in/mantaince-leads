@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
+const t = (val) => val;
+
 export const ReportsPage = () => {
   const { activeVertical, leadsRefreshTrigger } = useUiStore();
   const [loading, setLoading] = useState(true);
@@ -21,7 +23,7 @@ export const ReportsPage = () => {
   const [statusData, setStatusData] = useState([]);
   const [areaData, setAreaData] = useState([]);
   const [conversionData, setConversionData] = useState([]);
-  const [agentData, setAgentData] = useState([]);
+  const [agentData, setEmployeeData] = useState([]);
 
   // Compute dates based on range selection
   useEffect(() => {
@@ -55,7 +57,7 @@ export const ReportsPage = () => {
       setStatusData(statusRes.data.data);
       setAreaData(areaRes.data.data);
       setConversionData(conversionRes.data.data);
-      setAgentData(agentRes.data.data);
+      setEmployeeData(agentRes.data.data);
     } catch (err) {
       toast.error('Failed to load performance metrics distribution');
       console.error(err);
@@ -92,8 +94,8 @@ export const ReportsPage = () => {
     });
     csvContent += '\n';
 
-    // 3. Agent performance
-    csvContent += '--- AGENT CONVERSION METRICS ---\nAgent Name,Email,Assigned,Converted,Conversion Rate (%)\n';
+    // 3. Employee performance
+    csvContent += '--- AGENT CONVERSION METRICS ---\nEmployee Name,Email,Assigned,Converted,Conversion Rate (%)\n';
     agentData.forEach(ag => {
       csvContent += `"${ag.name}",${ag.email},${ag.totalAssigned},${ag.converted},${ag.conversionRate.toFixed(2)}\n`;
     });
@@ -126,7 +128,7 @@ export const ReportsPage = () => {
     if (statusData.length === 0) {
       return (
         <div className="flex items-center justify-center h-full text-xs text-[--text-secondary]">
-          No status distribution data
+          {t('No status distribution data')}
         </div>
       );
     }
@@ -164,7 +166,7 @@ export const ReportsPage = () => {
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <span className="text-2xl font-black text-[--text-primary] font-mono">{total}</span>
-            <span className="text-[9px] text-[--text-secondary] uppercase font-bold tracking-wider">Total Leads</span>
+            <span className="text-[9px] text-[--text-secondary] uppercase font-bold tracking-wider">{t('Total Leads')}</span>
           </div>
         </div>
 
@@ -192,7 +194,7 @@ export const ReportsPage = () => {
     if (areaData.length === 0) {
       return (
         <div className="flex items-center justify-center h-full text-xs text-[--text-secondary]">
-          No location distribution data found
+          {t('No location distribution data found')}
         </div>
       );
     }
@@ -227,7 +229,7 @@ export const ReportsPage = () => {
     if (conversionData.length === 0) {
       return (
         <div className="flex items-center justify-center h-full text-xs text-[--text-secondary]">
-          No conversion trend metrics available
+          {t('No conversion trend metrics available')}
         </div>
       );
     }
@@ -320,8 +322,8 @@ export const ReportsPage = () => {
         </svg>
 
         <div className="flex justify-between items-center text-[10px] text-[--text-secondary] px-2">
-          <span>Weekly dynamic conversion tracking</span>
-          <span className="flex items-center gap-1 text-[--accent]"><TrendingUp size={10} /> Goal rate target: 100%</span>
+          <span>{t('Weekly dynamic conversion tracking')}</span>
+          <span className="flex items-center gap-1 text-[--accent]"><TrendingUp size={10} /> {t('Goal rate target: 100%')}</span>
         </div>
       </div>
     );
@@ -330,7 +332,7 @@ export const ReportsPage = () => {
   if (!activeVertical) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-[--text-secondary] text-sm">
-        <span>No workspace active. Choose a Vertical to inspect reports.</span>
+        <span>{t('No workspace active. Choose a Vertical to inspect reports.')}</span>
       </div>
     );
   }
@@ -341,8 +343,8 @@ export const ReportsPage = () => {
       {/* Header bar controls */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-black text-[--text-primary] uppercase tracking-wider">Reports & Analytics</h2>
-          <p className="text-xs text-[--text-secondary] mt-1">Lead processing KPIs, conversion rates, and agent metrics dashboards</p>
+          <h2 className="text-2xl font-black text-[--text-primary] uppercase tracking-wider">{t('Reports & Analytics')}</h2>
+          <p className="text-xs text-[--text-secondary] mt-1">{t('Lead processing KPIs, conversion rates, and agent metrics dashboards')}</p>
         </div>
 
         {/* Date range picker selector controls */}
@@ -365,7 +367,7 @@ export const ReportsPage = () => {
                 rangeType === 'custom' ? 'bg-[--accent] text-white font-bold shadow-sm' : 'text-[--text-secondary] hover:text-[--text-primary] hover:bg-stone-50'
               }`}
             >
-              Custom
+              {t('Custom')}
             </button>
           </div>
 
@@ -377,7 +379,7 @@ export const ReportsPage = () => {
                 onChange={(e) => setDateFrom(e.target.value)}
                 className="bg-[--bg-input] border border-[--border-strong] rounded-lg px-2.5 py-1.5 text-[--text-primary] focus:outline-none focus:border-[--accent] text-xs font-mono"
               />
-              <span className="text-[--text-muted]">to</span>
+              <span className="text-[--text-muted]">{t('to')}</span>
               <input
                 type="date"
                 value={dateTo}
@@ -392,7 +394,7 @@ export const ReportsPage = () => {
             className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-stone-50 border border-[--border-strong] text-[--text-secondary] font-semibold text-xs rounded-lg transition-all shadow-sm"
           >
             <Download size={14} />
-            <span>Export CSV</span>
+            <span>{t('Export CSV')}</span>
           </button>
         </div>
       </div>
@@ -405,9 +407,9 @@ export const ReportsPage = () => {
           <div className="flex justify-between items-center border-b border-[--border] pb-3">
             <h3 className="text-sm font-bold text-[--text-primary] uppercase tracking-wider flex items-center gap-2">
               <CheckCircle2 size={16} className="text-[#2ecc71]" />
-              <span>Leads by Status</span>
+              <span>{t('Leads by Status')}</span>
             </h3>
-            <span className="text-[10px] text-[--text-secondary] uppercase font-bold tracking-wider">Donut Breakdown</span>
+            <span className="text-[10px] text-[--text-secondary] uppercase font-bold tracking-wider">{t('Donut Breakdown')}</span>
           </div>
           {loading ? (
             <div className="flex justify-center items-center h-48"><div className="spinner"></div></div>
@@ -421,9 +423,9 @@ export const ReportsPage = () => {
           <div className="flex justify-between items-center border-b border-[--border] pb-3">
             <h3 className="text-sm font-bold text-[--text-primary] uppercase tracking-wider flex items-center gap-2">
               <MapPin size={16} className="text-amber-500" />
-              <span>Top 10 Lead Locations (Area)</span>
+              <span>{t('Top 10 Lead Locations (Area)')}</span>
             </h3>
-            <span className="text-[10px] text-[--text-secondary] uppercase font-bold tracking-wider">Horizontal distribution</span>
+            <span className="text-[10px] text-[--text-secondary] uppercase font-bold tracking-wider">{t('Horizontal distribution')}</span>
           </div>
           {loading ? (
             <div className="flex justify-center items-center h-48"><div className="spinner"></div></div>
@@ -437,9 +439,9 @@ export const ReportsPage = () => {
           <div className="flex justify-between items-center border-b border-[--border] pb-3">
             <h3 className="text-sm font-bold text-[--text-primary] uppercase tracking-wider flex items-center gap-2">
               <TrendingUp size={16} className="text-[--accent]" />
-              <span>Weekly Conversion Trend</span>
+              <span>{t('Weekly Conversion Trend')}</span>
             </h3>
-            <span className="text-[10px] text-[--text-secondary] uppercase font-bold tracking-wider">Last 90 Days</span>
+            <span className="text-[10px] text-[--text-secondary] uppercase font-bold tracking-wider">{t('Last 90 Days')}</span>
           </div>
           {loading ? (
             <div className="flex justify-center items-center h-48"><div className="spinner"></div></div>
@@ -448,14 +450,14 @@ export const ReportsPage = () => {
           )}
         </div>
 
-        {/* Panel 4: Top Agents Performance Table */}
+        {/* Panel 4: Top Employees Performance Table */}
         <div className="glass-panel bg-white shadow-sm border border-[--border] p-6 space-y-4">
           <div className="flex justify-between items-center border-b border-[--border] pb-3">
             <h3 className="text-sm font-bold text-[--text-primary] uppercase tracking-wider flex items-center gap-2">
               <Award size={16} className="text-[--accent]" />
-              <span>Operator Conversion Performance</span>
+              <span>{t('Operator Conversion Performance')}</span>
             </h3>
-            <span className="text-[10px] text-[--text-secondary] uppercase font-bold tracking-wider">Ranked Conversion</span>
+            <span className="text-[10px] text-[--text-secondary] uppercase font-bold tracking-wider">{t('Ranked Conversion')}</span>
           </div>
 
           <div className="overflow-x-auto h-48 overflow-y-auto">
@@ -463,21 +465,21 @@ export const ReportsPage = () => {
               <div className="flex justify-center items-center h-full"><div className="spinner"></div></div>
             ) : agentData.length === 0 ? (
               <div className="flex items-center justify-center h-full text-xs text-[--text-secondary]">
-                No operators performance recorded in range
+                {t('No operators performance recorded in range')}
               </div>
             ) : (
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b border-[--border-strong] bg-stone-50 text-[10px] text-[--text-secondary] font-bold uppercase tracking-wider">
-                    <th className="px-4 py-2.5">Agent Name</th>
-                    <th className="px-4 py-2.5">Assigned</th>
-                    <th className="px-4 py-2.5">Converted</th>
-                    <th className="px-4 py-2.5 text-right">Conversion Ratio</th>
+                    <th className="px-4 py-2.5">{t('Employee Name')}</th>
+                    <th className="px-4 py-2.5">{t('Spoken To')}</th>
+                    <th className="px-4 py-2.5">{t('Converted')}</th>
+                    <th className="px-4 py-2.5 text-right">{t('Conversion Ratio')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[--border]">
                   {agentData.map(ag => (
-                    <tr key={ag._id} className="hover:bg-stone-50/50 transition-all">
+                    <tr key={ag.id} className="hover:bg-stone-50/50 transition-all">
                       <td className="px-4 py-2.5 font-bold text-[--text-primary] flex items-center gap-2 max-w-[150px] truncate">
                         <div className="w-6 h-6 rounded-full bg-[--accent-light] flex items-center justify-center text-[10px] uppercase text-[--accent] border border-[--accent-border]">
                           {ag.name.slice(0, 2)}

@@ -6,6 +6,7 @@ import {
   AlertTriangle, HelpCircle, Save, Download, ArrowUp, ArrowDown, ListFilter
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useUiStore } from '../store/uiStore.js';
 
 export const AdminFieldsPage = () => {
   const { id: verticalId } = useParams();
@@ -13,6 +14,12 @@ export const AdminFieldsPage = () => {
   const [vertical, setVertical] = useState(null);
   const [fields, setFields] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Status management state
+  const [statuses, setStatuses] = useState([]);
+  const [newStatusLabel, setNewStatusLabel] = useState('');
+  const [newStatusValue, setNewStatusValue] = useState('');
+  const [isUpdatingStatuses, setIsUpdatingStatuses] = useState(false);
 
   // Field Add Form Panel state
   const [showAddDrawer, setShowAddDrawer] = useState(false);
@@ -37,6 +44,8 @@ export const AdminFieldsPage = () => {
   const [editingType, setEditingType] = useState('');
   const [editingCsvHeader, setEditingCsvHeader] = useState('');
 
+  const { leadsRefreshTrigger } = useUiStore();
+
   const fetchFieldMetadata = async () => {
     setLoading(true);
     try {
@@ -46,6 +55,7 @@ export const AdminFieldsPage = () => {
       ]);
       setVertical(vertRes.data.data);
       setFields(fieldsRes.data.data);
+      setStatuses(vertRes.data.data.statuses || []);
     } catch {
       toast.error('Failed to load vertical field configuration data');
     } finally {
@@ -57,7 +67,36 @@ export const AdminFieldsPage = () => {
     if (verticalId) {
       fetchFieldMetadata();
     }
-  }, [verticalId]);
+  }, [verticalId, leadsRefreshTrigger]);
+
+  const handleAddStatus = async () => {
+    if (!newStatusLabel || !newStatusValue) {
+      toast.error('Label and Value are required for new status');
+      return;
+    }
+    const updated = [...statuses, { label: newStatusLabel, value: newStatusValue }];
+    await saveStatuses(updated);
+    setNewStatusLabel('');
+    setNewStatusValue('');
+  };
+
+  const handleDeleteStatus = async (index) => {
+    const updated = statuses.filter((_, i) => i !== index);
+    await saveStatuses(updated);
+  };
+
+  const saveStatuses = async (updated) => {
+    setIsUpdatingStatuses(true);
+    try {
+      await axios.patch(`/api/v1/verticals/${verticalId}`, { statuses: updated });
+      setStatuses(updated);
+      toast.success('Lead statuses updated');
+    } catch {
+      toast.error('Failed to save status configuration');
+    } finally {
+      setIsUpdatingStatuses(false);
+    }
+  };
 
   // Handle auto-generation of machine key from label
   useEffect(() => {
@@ -264,6 +303,7 @@ export const AdminFieldsPage = () => {
                 <th className="px-4 py-4 text-center">Show Table</th>
                 <th className="px-4 py-4 text-center">CSV Mapping</th>
                 <th className="px-4 py-4 text-center">Visible</th>
+                <th className="px-4 py-4 text-center">Status</th>
                 <th className="px-6 py-4 text-right">Actions</th>
               </tr>
             </thead>
@@ -408,6 +448,16 @@ export const AdminFieldsPage = () => {
                       />
                     </td>
 
+                    {/* Status flag toggle */}
+                    <td className="px-4 py-4 text-center">
+                      <input
+                        type="checkbox"
+                        checked={field.isActive !== false}
+                        onChange={() => handleToggleBoolean(field, 'isActive', field.isActive !== false)}
+                        className="rounded border-[--border-strong] bg-[--bg-input] text-[--accent] focus:ring-0 w-4 h-4 cursor-pointer"
+                      />
+                    </td>
+
                     {/* Action buttons */}
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-2">
@@ -429,7 +479,7 @@ export const AdminFieldsPage = () => {
                         ) : (
                           <>
                             <button
-                              onClick={() => handleStartEditSub(field)} // reuse parent start inline edit
+                              onClick={() => handleStartInlineEdit(field)}
                               className="p-1 border border-[--border-strong] text-[--text-secondary] hover:text-[--accent] rounded transition-all bg-white hover:bg-stone-50"
                             >
                               <Edit2 size={12} />
@@ -452,7 +502,62 @@ export const AdminFieldsPage = () => {
         </div>
       </div>
 
-      {/* Slide-over field add configuration drawer panel */}
+      {/* Statuses Section */}
+      <div className="glass-panel border border-[--border] bg-white shadow-sm p-6 space-y-4">
+        <div>
+          <h3 className="text-sm font-bold text-[--text-primary] uppercase tracking-wider flex items-center gap-2">
+            <ListFilter size={16} className="text-[--accent]" />
+            <span>Configure Lead Statuses</span>
+          </h3>
+          <p className="text-xs text-[--text-secondary] mt-1">Define the workflow stages for leads in this vertical.</p>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {statuses.map((status, idx) => (
+            <div key={idx} className="flex items-center gap-2 bg-stone-50 border border-stone-200 rounded-lg px-3 py-1.5 group">
+              <span className="text-xs font-bold text-[--text-primary]">{status.label}</span>
+              <span className="text-[10px] text-[--text-muted] font-mono">({status.value})</span>
+              <button 
+                onClick={() => handleDeleteStatus(idx)}
+                className="text-stone-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex flex-col md:flex-row gap-3 pt-2">
+          <input
+            type="text"
+            placeholder="Status Label (e.g. New Lead)"
+            value={newStatusLabel}
+            onChange={(e) => {
+              setNewStatusLabel(e.target.value);
+              if (!newStatusValue) {
+                setNewStatusValue(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '_'));
+              }
+            }}
+            className="flex-1 bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+          />
+          <input
+            type="text"
+            placeholder="System Value (e.g. new_lead)"
+            value={newStatusValue}
+            onChange={(e) => setNewStatusValue(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '_'))}
+            className="flex-1 bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-[--accent]"
+          />
+          <button
+            onClick={handleAddStatus}
+            disabled={isUpdatingStatuses}
+            className="px-4 py-2 bg-[--accent] text-white font-black uppercase text-xs rounded-lg hover:bg-[--accent-hover] transition-all"
+          >
+            {isUpdatingStatuses ? '...' : 'Add Status'}
+          </button>
+        </div>
+      </div>
+
+            {/* Slide-over field add configuration drawer panel */}
       {showAddDrawer && (
         <div className="fixed inset-0 z-50 flex justify-end bg-stone-900/40 backdrop-blur-sm">
           <div className="w-full max-w-lg bg-white h-full shadow-2xl border-l border-[--border] flex flex-col justify-between">

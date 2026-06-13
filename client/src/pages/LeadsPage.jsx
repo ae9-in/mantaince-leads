@@ -22,6 +22,7 @@ import {
   Upload,
   CheckCircle2,
   X,
+  Calendar,
 } from 'lucide-react';
 import axios from '../api/axios.js';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
@@ -30,25 +31,12 @@ import Loader from '../components/Loader.jsx';
 import { useAuthStore } from '../store/authStore.js';
 import { useUiStore } from '../store/uiStore.js';
 import toast from 'react-hot-toast';
-
-const STATUS_OPTIONS = [
-  { value: 'new', label: 'New' },
-  { value: 'contacted', label: 'Contacted' },
-  { value: 'qualified', label: 'Qualified' },
-  { value: 'visit_scheduled', label: 'Meeting Scheduled' },
-  { value: 'visit_completed', label: 'Meeting Completed' },
-  { value: 'negotiation', label: 'Negotiation' },
-  { value: 'converted', label: 'Converted' },
-  { value: 'lost', label: 'Lost' },
-  { value: 'invalid', label: 'Invalid' },
-];
+import GeotagCapture from '../components/GeotagCapture.jsx';
 
 const BASE_DYNAMIC_FIELDS = [
   { key: 'nameBusiness', label: 'Name Business', type: 'text', defaultValue: '' },
   { key: 'date', label: 'Date', type: 'date', defaultValue: '' },
-  { key: 'employeeSpoken', label: 'Employee Spoken', type: 'text', defaultValue: '' },
-  { key: 'convertedStatus', label: 'Converted Status', type: 'text', defaultValue: '' },
-  { key: 'deliveredLocation', label: 'Delivered Location', type: 'text', defaultValue: '' },
+  { key: 'deliveredLocation', label: 'Delivered Location (google maps location)', type: 'text', defaultValue: '' },
   { key: 'deliveredLink', label: 'Delivered Link', type: 'url', defaultValue: '' },
 ];
 
@@ -102,11 +90,40 @@ const createBaseDynamicDefaults = () =>
     return acc;
   }, {});
 
+const TableRow = React.memo(({ row }) => {
+  return (
+    <tr className="border-b border-[--border] hover:bg-stone-50/50">
+      {row.getVisibleCells().map((cell) => (
+        <td key={cell.id} className="px-4 py-3 text-[--text-primary] whitespace-nowrap text-xs">
+          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+        </td>
+      ))}
+    </tr>
+  );
+}, (prevProps, nextProps) => {
+  return prevProps.row.getIsSelected() === nextProps.row.getIsSelected() &&
+         prevProps.row.original === nextProps.row.original;
+});
+
 export const LeadsPage = () => {
   const { activeVertical, activeSubVertical, leadsRefreshTrigger } = useUiStore();
   const { user } = useAuthStore();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  const STATUS_OPTIONS = useMemo(() => {
+    return activeVertical?.statuses || [
+      { value: 'new', label: 'New' },
+      { value: 'contacted', label: 'Contacted' },
+      { value: 'qualified', label: 'Qualified' },
+      { value: 'visit_scheduled', label: 'Meeting Scheduled' },
+      { value: 'visit_completed', label: 'Meeting Completed' },
+      { value: 'negotiation', label: 'Negotiation' },
+      { value: 'converted', label: 'Converted' },
+      { value: 'lost', label: 'Lost' },
+      { value: 'invalid', label: 'Invalid' },
+    ];
+  }, [activeVertical]);
 
   const page = parseInt(searchParams.get('page') || '1', 10);
   const limit = parseInt(searchParams.get('limit') || '15', 10);
@@ -114,6 +131,9 @@ export const LeadsPage = () => {
   const statusFilter = searchParams.get('status') || '';
   const subVerticalFilter = searchParams.get('subVerticalId') || '';
   const agentFilter = searchParams.get('assignedTo') || '';
+  const leadTypeFilter = searchParams.get('leadType') || '';
+  const dateFromFilter = searchParams.get('dateFrom') || '';
+  const dateToFilter = searchParams.get('dateTo') || '';
   const sortBy = searchParams.get('sortBy') || 'createdAt';
   const sortDir = searchParams.get('sortDir') || 'desc';
   const csvBatchId = searchParams.get('csvBatchId') || '';
@@ -130,6 +150,16 @@ export const LeadsPage = () => {
   const [showFilters, setShowFilters] = useState(false);
   const [columnVisibility, setColumnVisibility] = useState({});
 
+  const activeFiltersCount = useMemo(() => {
+    return [
+      statusFilter,
+      agentFilter,
+      leadTypeFilter,
+      dateFromFilter,
+      dateToFilter,
+    ].filter(Boolean).length;
+  }, [statusFilter, agentFilter, leadTypeFilter, dateFromFilter, dateToFilter]);
+
   const [bulkAssignModal, setBulkAssignModal] = useState(false);
   const [bulkStatusModal, setBulkStatusModal] = useState(false);
   const [bulkDeleteDialog, setBulkDeleteDialog] = useState(false);
@@ -141,8 +171,13 @@ export const LeadsPage = () => {
   const [leadFormName, setLeadFormName] = useState('');
   const [leadFormPhone, setLeadFormPhone] = useState('');
   const [leadFormBusiness, setLeadFormBusiness] = useState('');
+  const [leadFormAssignedTo, setLeadFormAssignedTo] = useState('');
   const [leadFormDynamic, setLeadFormDynamic] = useState(createBaseDynamicDefaults());
   const [formErrors, setFormErrors] = useState([]);
+  const [leadFormLeadType, setLeadFormLeadType] = useState('CALL');
+  const [leadFormGeotagCoords, setLeadFormGeotagCoords] = useState(null);
+  const [leadFormGeotagFile, setLeadFormGeotagFile] = useState(null);
+  const [leadFormStatus, setLeadFormStatus] = useState('new');
 
   // CSV Import Modal states
   const [csvImportModalOpen, setCsvImportModalOpen] = useState(false);
@@ -167,7 +202,7 @@ export const LeadsPage = () => {
   }, [searchParams, setSearchParams]);
 
   const customConfigs = useMemo(
-    () => configs.filter((config) => !BASE_DYNAMIC_FIELD_KEYS.has(config.fieldKey)),
+    () => configs.filter((config) => !BASE_DYNAMIC_FIELD_KEYS.has(config.fieldKey) && config.isActive !== false),
     [configs]
   );
 
@@ -205,6 +240,9 @@ export const LeadsPage = () => {
         sortBy,
         sortDir,
       });
+      if (leadTypeFilter) qParams.set('leadType', leadTypeFilter);
+      if (dateFromFilter) qParams.set('dateFrom', dateFromFilter);
+      if (dateToFilter) qParams.set('dateTo', dateToFilter);
       if (csvBatchId) {
         qParams.set('csvBatchId', csvBatchId);
       }
@@ -219,7 +257,7 @@ export const LeadsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [activeVertical, agentFilter, limit, page, search, sortBy, sortDir, statusFilter, subVerticalFilter, csvBatchId]);
+  }, [activeVertical, agentFilter, limit, page, search, sortBy, sortDir, statusFilter, subVerticalFilter, csvBatchId, leadTypeFilter, dateFromFilter, dateToFilter]);
 
   useEffect(() => {
     if (!activeVertical) return;
@@ -251,7 +289,7 @@ export const LeadsPage = () => {
 
         if (isAdmin) {
           const usersRes = await axios.get('/api/v1/users');
-          setAgents((usersRes.data.data || []).filter((member) => member.isActive));
+          setAgents((usersRes.data.data || []).filter((member) => member.is_active));
         }
       } catch (err) {
         console.error('Error fetching layout metadata:', err);
@@ -313,7 +351,12 @@ export const LeadsPage = () => {
     setLeadFormPhone('');
     setLeadFormBusiness('');
     setLeadFormSubVerticalId('');
+    setLeadFormAssignedTo('');
+    setLeadFormLeadType('CALL');
+    setLeadFormGeotagCoords(null);
+    setLeadFormGeotagFile(null);
     setLeadFormDynamic(buildInitialDynamic());
+    setLeadFormStatus('new');
     setLeadModalOpen(true);
   };
 
@@ -322,9 +365,22 @@ export const LeadsPage = () => {
     setFormErrors([]);
     setLeadFormName(lead.name || '');
     setLeadFormPhone(lead.phone || '');
-    setLeadFormBusiness(lead.businessName || '');
-    setLeadFormSubVerticalId(lead.subVerticalId?._id || lead.subVerticalId || '');
+    setLeadFormBusiness(lead.businessName || lead.business_name || '');
+    setLeadFormSubVerticalId(lead.subVerticalId?._id || lead.subVerticalId || lead.sub_vertical_id || '');
+    setLeadFormAssignedTo(lead.assigned_to || lead.assignedTo || '');
+    setLeadFormLeadType(lead.lead_type || lead.leadType || 'CALL');
+    setLeadFormGeotagCoords(
+      lead.geotag_lat || lead.geotagLat
+        ? {
+            lat: lead.geotag_lat || lead.geotagLat,
+            lng: lead.geotag_lng || lead.geotagLng,
+            accuracy: lead.geotag_accuracy || lead.geotagAccuracy,
+          }
+        : null
+    );
+    setLeadFormGeotagFile(null);
     setLeadFormDynamic(buildInitialDynamic(lead));
+    setLeadFormStatus(lead.status || 'new');
     setLeadModalOpen(true);
   };
 
@@ -337,24 +393,51 @@ export const LeadsPage = () => {
       phone: leadFormPhone,
       businessName: leadFormBusiness,
       verticalId: activeVertical._id,
-      subVerticalId: subVerticalFilter || leadFormSubVerticalId || null,
+      subVerticalId: leadFormSubVerticalId || subVerticalFilter || null,
       data: leadFormDynamic,
+      assignedTo: leadFormAssignedTo || null,
+      leadType: leadFormLeadType,
+      status: leadFormStatus,
     };
 
+    if (leadFormGeotagCoords) {
+      payload.geotagLat = leadFormGeotagCoords.lat;
+      payload.geotagLng = leadFormGeotagCoords.lng;
+      payload.geotagAccuracy = leadFormGeotagCoords.accuracy;
+      payload.geotagCapturedAt = new Date().toISOString();
+    }
+
     if (selectedLead) {
-      payload.status = selectedLead.status;
+      payload.status = leadFormStatus;
       payload.subVerticalId = selectedLead.subVerticalId?._id || selectedLead.subVerticalId || leadFormSubVerticalId || null;
-      payload.assignedTo = selectedLead.assignedTo?._id || selectedLead.assignedTo || null;
+      payload.assignedTo = leadFormAssignedTo || null;
+      payload.leadType = leadFormLeadType;
     }
 
     try {
+      let savedLead;
       if (selectedLead) {
-        await axios.patch(`/api/v1/leads/${selectedLead._id}`, payload);
+        const response = await axios.patch(`/api/v1/leads/${selectedLead._id}`, payload);
+        savedLead = response.data.data;
         toast.success('Lead updated successfully.');
       } else {
-        await axios.post('/api/v1/leads', payload);
+        const response = await axios.post('/api/v1/leads', payload);
+        savedLead = response.data.data;
         toast.success('New lead created.');
       }
+
+      if (leadFormGeotagFile && savedLead && (savedLead._id || savedLead.id)) {
+        const targetId = savedLead._id || savedLead.id;
+        const formData = new FormData();
+        formData.append('photo', leadFormGeotagFile);
+        await axios.post(`/api/v1/leads/${targetId}/photo`, formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        });
+        toast.success('Field photo uploaded successfully.');
+      }
+
       setLeadModalOpen(false);
       fetchLeads();
     } catch (err) {
@@ -430,6 +513,9 @@ export const LeadsPage = () => {
         assignedTo: agentFilter,
         search,
       });
+      if (leadTypeFilter) qParams.set('leadType', leadTypeFilter);
+      if (dateFromFilter) qParams.set('dateFrom', dateFromFilter);
+      if (dateToFilter) qParams.set('dateTo', dateToFilter);
 
       const response = await axios.get(`/api/v1/leads/export/csv?${qParams.toString()}`);
       const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
@@ -476,7 +562,7 @@ export const LeadsPage = () => {
     const formData = new FormData();
     formData.append('file', selectedFile);
     formData.append('verticalId', activeVertical._id);
-    formData.append('subVerticalId', ''); // Always upload at the vertical level
+    formData.append('subVerticalId', leadFormSubVerticalId || subVerticalFilter || '');
     if (assignTarget) {
       formData.append('assignedTo', assignTarget);
     }
@@ -584,6 +670,18 @@ export const LeadsPage = () => {
       { accessorKey: 'phone', header: 'Number' },
       { accessorKey: 'businessName', header: 'Business' },
       {
+        accessorKey: 'assignee_name',
+        header: 'Employee Spoken',
+        cell: ({ row }) => (
+          <div className="flex items-center gap-1.5">
+            <div className="w-5 h-5 rounded bg-stone-100 flex items-center justify-center text-[8px] border border-stone-200 font-bold">
+              {row.original.assignee_name?.slice(0, 1) || '?'}
+            </div>
+            <span>{row.original.assignee_name || 'Unassigned'}</span>
+          </div>
+        ),
+      },
+      {
         id: 'nameBusiness',
         header: 'Name Business',
         cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'nameBusiness')),
@@ -594,18 +692,8 @@ export const LeadsPage = () => {
         cell: ({ row }) => formatDynamicValue('date', getLeadData(row.original, 'date')),
       },
       {
-        id: 'employeeSpoken',
-        header: 'Employee Spoken',
-        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'employeeSpoken')),
-      },
-      {
-        id: 'convertedStatus',
-        header: 'Converted Status',
-        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'convertedStatus')),
-      },
-      {
         id: 'deliveredLocation',
-        header: 'Delivered Location',
+        header: 'Delivered Location (google maps location)',
         cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'deliveredLocation')),
       },
       {
@@ -631,6 +719,14 @@ export const LeadsPage = () => {
         header: 'Actions',
         cell: ({ row }) => (
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => navigate(`/leads/${row.original._id}#follow-ups`)}
+              className="p-2 border border-stone-200 rounded-lg hover:bg-stone-50 text-[--accent]"
+              title="Follow-up Leads"
+            >
+              <Calendar size={14} />
+            </button>
             <button
               type="button"
               onClick={() => handleOpenEdit(row.original)}
@@ -722,6 +818,11 @@ export const LeadsPage = () => {
           >
             <Filter size={16} />
             <span>Filters</span>
+            {activeFiltersCount > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 bg-[--accent] text-white text-[10px] font-black rounded-full leading-none">
+                {activeFiltersCount}
+              </span>
+            )}
           </button>
           <button
             type="button"
@@ -738,6 +839,14 @@ export const LeadsPage = () => {
           >
             <Upload size={16} />
             <span>Import CSV</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/calendar')}
+            className="inline-flex items-center gap-2 px-4 py-2 border border-[--accent-border] hover:border-[--accent] text-[--accent] bg-white rounded-lg font-bold text-sm hover:bg-stone-50 shadow-sm transition-all animate-none"
+          >
+            <Calendar size={16} />
+            <span>Follow-up Leads</span>
           </button>
           <button
             type="button"
@@ -790,13 +899,39 @@ export const LeadsPage = () => {
               </select>
             </FilterInput>
 
-            <FilterInput label="Assigned Agent">
+            <FilterInput label="Employee Spoken">
               <select value={agentFilter} onChange={(event) => updateQueryParam('assignedTo', event.target.value)} className="w-full">
                 <option value="">All Agents</option>
                 {agents.map((agent) => (
-                  <option key={agent._id} value={agent._id}>{agent.name}</option>
+                  <option key={agent.id} value={agent.id}>{agent.name}</option>
                 ))}
               </select>
+            </FilterInput>
+
+            <FilterInput label="Lead Type">
+              <select value={leadTypeFilter} onChange={(event) => updateQueryParam('leadType', event.target.value)} className="w-full">
+                <option value="">All Types</option>
+                <option value="CALL">Call Inquiry (Remote)</option>
+                <option value="FIELD">Field Visit (On-Site)</option>
+              </select>
+            </FilterInput>
+
+            <FilterInput label="Date From">
+              <input
+                type="date"
+                value={dateFromFilter}
+                onChange={(event) => updateQueryParam('dateFrom', event.target.value)}
+                className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-1.5 focus:outline-none focus:border-[--accent] text-xs"
+              />
+            </FilterInput>
+
+            <FilterInput label="Date To">
+              <input
+                type="date"
+                value={dateToFilter}
+                onChange={(event) => updateQueryParam('dateTo', event.target.value)}
+                className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-1.5 focus:outline-none focus:border-[--accent] text-xs"
+              />
             </FilterInput>
           </div>
         </div>
@@ -840,13 +975,7 @@ export const LeadsPage = () => {
               </thead>
               <tbody>
                 {table.getRowModel().rows.map((row) => (
-                  <tr key={row.id} className="border-b border-[--border] hover:bg-stone-50/50">
-                    {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id} className="px-4 py-3 text-[--text-primary] whitespace-nowrap text-xs">
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </td>
-                    ))}
-                  </tr>
+                  <TableRow key={row.id} row={row} />
                 ))}
               </tbody>
             </table>
@@ -941,16 +1070,32 @@ export const LeadsPage = () => {
                   )}
                 </div>
 
-                {isAdmin && (
-                  <FilterInput label="Optionally assign all imported leads to operator">
-                    <select value={assignTarget} onChange={(e) => setAssignTarget(e.target.value)} className="w-full">
-                      <option value="">-- Leave Unassigned --</option>
-                      {agents.map((agent) => (
-                        <option key={agent._id} value={agent._id}>{agent.name}</option>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FilterInput label="Select Target Sub-Vertical *">
+                    <select 
+                      required
+                      value={leadFormSubVerticalId || subVerticalFilter || ''} 
+                      onChange={(e) => setLeadFormSubVerticalId(e.target.value)} 
+                      className="w-full"
+                    >
+                      <option value="">-- Choose Sub-Vertical --</option>
+                      {subVerticals.map((sub) => (
+                        <option key={sub._id} value={sub._id}>{sub.name}</option>
                       ))}
                     </select>
                   </FilterInput>
-                )}
+
+                  {isAdmin && (
+                    <FilterInput label="Optionally assign to operator">
+                      <select value={assignTarget} onChange={(e) => setAssignTarget(e.target.value)} className="w-full">
+                        <option value="">-- Leave Unassigned --</option>
+                        {agents.map((agent) => (
+                          <option key={agent.id} value={agent.id}>{agent.name}</option>
+                        ))}
+                      </select>
+                    </FilterInput>
+                  )}
+                </div>
 
                 <div className="flex items-center justify-between pt-2">
                   <button
@@ -1124,6 +1269,58 @@ export const LeadsPage = () => {
                     </select>
                   </FormField>
                 )}
+
+                <FormField label="Employee Spoken">
+                  <select
+                    value={leadFormAssignedTo}
+                    onChange={(event) => setLeadFormAssignedTo(event.target.value)}
+                  >
+                    <option value="">-- Unassigned --</option>
+                    {agents.map((agent) => (
+                      <option key={agent.id} value={agent.id}>{agent.name} ({agent.email})</option>
+                    ))}
+                  </select>
+                </FormField>
+
+                <FormField label="Lead Type">
+                  <select
+                    value={leadFormLeadType}
+                    onChange={(event) => {
+                      setLeadFormLeadType(event.target.value);
+                      if (event.target.value !== 'FIELD') {
+                        setLeadFormGeotagCoords(null);
+                        setLeadFormGeotagFile(null);
+                      }
+                    }}
+                  >
+                    <option value="CALL">Calls</option>
+                    <option value="FIELD">Field Visit</option>
+                  </select>
+                </FormField>
+
+                <FormField label="Status">
+                  <select
+                    value={leadFormStatus}
+                    onChange={(event) => setLeadFormStatus(event.target.value)}
+                  >
+                    {STATUS_OPTIONS.map((status) => (
+                      <option key={status.value} value={status.value}>{status.label}</option>
+                    ))}
+                  </select>
+                </FormField>
+
+                {leadFormLeadType === 'FIELD' && (
+                  <div className="col-span-1 md:col-span-2 xl:col-span-3">
+                    <GeotagCapture
+                      leadType="FIELD_VISIT"
+                      onChange={(coords, file) => {
+                        if (coords) setLeadFormGeotagCoords(coords);
+                        if (file) setLeadFormGeotagFile(file);
+                      }}
+                    />
+                  </div>
+                )}
+
                 {BASE_DYNAMIC_FIELDS.map((field) => (
                   <FormField key={field.key} label={field.label}>
                     <input
@@ -1179,7 +1376,7 @@ export const LeadsPage = () => {
             <select value={bulkAssignTarget} onChange={(event) => setBulkAssignTarget(event.target.value)} className="w-full">
               <option value="">-- Unassign All --</option>
               {agents.map((agent) => (
-                <option key={agent._id} value={agent._id}>{agent.name}</option>
+                <option key={agent.id} value={agent.id}>{agent.name}</option>
               ))}
             </select>
           </FilterInput>

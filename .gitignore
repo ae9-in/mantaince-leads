@@ -40,3 +40,22 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+# Temporary debugging scripts
+/check_syntax.js
+/cleanup.js
+/find_brace_error.js
+/find_p_brace_error.js
+/trace_leadspage.js
+/backend/src/config/test-rds-connection.js
+/server/src/config/test-rds-connection.js
+/server/src/testCalendarEndpoints.js
+/server/src/testFilterEndpoints.js
+/server/test_login_manual.js
+/server/test_login_production.js
+/server/test_login_request.js
+
+# Test results and reports
+/playwright-report/
+/test-results/
+

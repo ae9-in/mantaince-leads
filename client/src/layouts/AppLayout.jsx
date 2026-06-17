@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { 
   Layers, Users, Settings, LogOut, ChevronDown, 
-  Menu, X, Bell, BarChart3, ChevronRight, FileSpreadsheet, Calendar, ClipboardList, TrendingUp
+  Menu, X, Bell, BarChart3, ChevronRight, FileSpreadsheet, Calendar, ClipboardList, TrendingUp, Terminal
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore.js';
 import { useUiStore } from '../store/uiStore.js';
@@ -220,6 +220,8 @@ export const AppLayout = () => {
               {navLink('/admin/dashboard', TrendingUp, 'Admin Dashboard', true)}
               {navLink('/admin/users', Users, 'User Accounts', true)}
               {navLink('/admin/verticals', Settings, 'Verticals & Fields', false)}
+              {navLink('/admin/audit-logs', Terminal, 'Audit Logs', true)}
+
             </div>
           )}
 
@@ -330,7 +332,9 @@ export const AppLayout = () => {
                     ['/admin/dashboard', TrendingUp, 'Admin Dashboard'],
                     ['/admin/users', Users, 'User Accounts'],
                     ['/admin/verticals', Settings, 'Verticals & Fields'],
+                    ['/admin/audit-logs', Terminal, 'Audit Logs'],
                   ].map(([to, Icon, label]) => (
+
                     <Link key={to} to={to} onClick={() => setMobileOpen(false)}
                       className={`flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-all ${
                         location.pathname.startsWith(to) ? 'bg-[--accent-light] text-[--accent]' : 'text-[--text-secondary] hover:bg-stone-100'

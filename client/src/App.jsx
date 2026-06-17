@@ -22,6 +22,8 @@ const AdminSubVerticalFieldsPage = lazy(() => import('./pages/AdminSubVerticalFi
 const CalendarPage = lazy(() => import('./pages/CalendarPage.jsx'));
 const FollowUpsPage = lazy(() => import('./pages/FollowUpsPage.jsx'));
 const AdminDashboardPage = lazy(() => import('./pages/AdminDashboardPage.jsx'));
+const AuditLogsPage = lazy(() => import('./pages/AuditLogsPage.jsx'));
+
 
 // Loader spinner
 const LoadingScreen = () => (
@@ -133,6 +135,12 @@ export const App = () => {
                   <AdminUsersPage />
                 </PermissionRoute>
               } />
+              <Route path="admin/audit-logs" element={
+                <PermissionRoute roleRequired="admin">
+                  <AuditLogsPage />
+                </PermissionRoute>
+              } />
+
               <Route path="admin/verticals" element={
                 <PermissionRoute roleRequired="admin">
                   <AdminVerticalsPage />

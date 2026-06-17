@@ -468,6 +468,11 @@ const runMigrations = async () => {
         CREATE INDEX IF NOT EXISTS idx_custom_fields_sub_vertical_order ON custom_fields (sub_vertical_id, is_active, "order");
         CREATE INDEX IF NOT EXISTS idx_lead_custom_values_lead_id ON lead_custom_values (lead_id);
         CREATE INDEX IF NOT EXISTS idx_follow_ups_lead_date ON follow_ups (lead_id, follow_up_date);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_id ON audit_logs (actor_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs (action);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs (created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_target_collection ON audit_logs (target_collection);
+
         CREATE INDEX IF NOT EXISTS idx_follow_ups_sub_vertical_date ON follow_ups (sub_vertical_id, follow_up_date);
         CREATE INDEX IF NOT EXISTS idx_follow_ups_assigned_status_date ON follow_ups (assigned_to_id, status, follow_up_date);
         CREATE INDEX IF NOT EXISTS idx_follow_ups_date ON follow_ups (follow_up_date);

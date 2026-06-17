@@ -464,6 +464,13 @@ const runMigrations = async () => {
         -- Effective because leads are inserted in approximately chronological order.
         CREATE INDEX IF NOT EXISTS idx_leads_created_brin ON leads USING BRIN (created_at);
 
+        -- Performance sort & filter indexes for active leads
+        CREATE INDEX IF NOT EXISTS idx_leads_vertical_name ON leads (vertical_id, name) WHERE is_deleted = false;
+        CREATE INDEX IF NOT EXISTS idx_leads_vertical_business_name ON leads (vertical_id, business_name) WHERE is_deleted = false;
+        CREATE INDEX IF NOT EXISTS idx_leads_vertical_updated_at ON leads (vertical_id, updated_at DESC, id DESC) WHERE is_deleted = false;
+        CREATE INDEX IF NOT EXISTS idx_leads_vertical_sub_vertical ON leads (vertical_id, sub_vertical_id) WHERE is_deleted = false;
+
+
         -- Performance indexes for new tables
         CREATE INDEX IF NOT EXISTS idx_custom_fields_sub_vertical_order ON custom_fields (sub_vertical_id, is_active, "order");
         CREATE INDEX IF NOT EXISTS idx_lead_custom_values_lead_id ON lead_custom_values (lead_id);

@@ -192,11 +192,26 @@ export const refresh = async (req, res) => {
 export const logout = async (req, res) => {
   const token = req.cookies.refreshToken;
   try {
+    let userId = null;
     if (token) {
       const tokenHash = hashToken(token);
       await query('DELETE FROM sessions WHERE token_hash = $1', [tokenHash]);
+      try {
+        const decoded = verifyRefreshToken(token);
+        userId = decoded.sub;
+      } catch {}
     }
     clearRefreshCookie(res);
+
+    if (userId) {
+      const mockReq = { ...req, user: { sub: userId } };
+      await logAudit(mockReq, {
+        action: 'user.logout',
+        targetCollection: 'users',
+        targetId: userId
+      });
+    }
+
     return res.status(200).json({ success: true, data: { message: 'Logged out successfully' } });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
@@ -275,6 +290,13 @@ export const forgotPassword = async (req, res) => {
     } catch (mailError) {
       console.warn('⚠️ Mail transport failed, logging link in console:', resetUrl);
     }
+
+    await logAudit(null, {
+      action: 'user.forgot_password_request',
+      targetCollection: 'users',
+      targetId: user.id,
+      after: { email: user.email }
+    });
 
     return res.status(200).json({ success: true, data: { message: 'Reset email queued' } });
   } catch (error) {

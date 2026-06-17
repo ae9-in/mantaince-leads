@@ -225,6 +225,13 @@ export const reorderFieldConfigs = async (req, res) => {
 
         await invalidateOnTaxonomyChange(verticalId);
 
+        logAudit(req, {
+            action: 'field_config.reorder',
+            targetCollection: 'field_configs',
+            targetId: verticalId,
+            after: items
+        });
+
         broadcastToAll({ type: 'LEAD_MUTATED', verticalId, action: 'field_config_reorder' });
 
         return res.status(200).json({ success: true, data: { message: 'Field positions updated successfully' } });

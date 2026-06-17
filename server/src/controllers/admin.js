@@ -230,6 +230,13 @@ export const reorderCustomFields = async (req, res) => {
       broadcastToAll({ type: 'LEAD_MUTATED', verticalId, action: 'custom_field_reorder' });
     }
 
+    await logAudit(req, {
+      action: 'CUSTOM_FIELD_REORDERED',
+      targetCollection: 'custom_fields',
+      targetId: subVerticalId,
+      after: listRes.rows
+    });
+
     return res.status(200).json({ success: true, data: listRes.rows });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
@@ -485,6 +492,13 @@ export const reorderSubVerticalStages = async (req, res) => {
       WHERE sub_vertical_id = $1 
       ORDER BY display_order ASC
     `, [subVerticalId]);
+
+    await logAudit(req, {
+      action: 'STAGE_REORDERED',
+      targetCollection: 'lead_stages',
+      targetId: subVerticalId,
+      after: listRes.rows
+    });
 
     return res.status(200).json({ success: true, data: listRes.rows });
   } catch (error) {

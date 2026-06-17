@@ -238,6 +238,13 @@ export const reorderVerticals = async (req, res) => {
 
         await invalidateOnTaxonomyChange(null);
 
+        await logAudit(req, {
+            action: 'vertical.reorder',
+            targetCollection: 'verticals',
+            targetId: null,
+            after: items
+        });
+
         return res.status(200).json({ success: true, data: { message: 'Order updated' } });
     } catch (error) {
         return res.status(500).json({ success: false, error: error.message });
@@ -429,6 +436,13 @@ export const reorderSubVerticals = async (req, res) => {
         `, params);
 
         await invalidateOnTaxonomyChange(verticalId);
+
+        await logAudit(req, {
+            action: 'sub_vertical.reorder',
+            targetCollection: 'sub_verticals',
+            targetId: verticalId,
+            after: items
+        });
 
         return res.status(200).json({ success: true, data: { message: 'Order updated' } });
     } catch (error) {

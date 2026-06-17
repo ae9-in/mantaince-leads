@@ -1,6 +1,7 @@
 import { query } from '../config/db.js';
 import crypto from 'crypto';
 import { broadcast, addClient, removeClient } from '../services/assignmentBroadcaster.js';
+import { logAudit } from '../services/audit.js';
 
 /**
  * SSE Stream Endpoint
@@ -66,6 +67,13 @@ export const bulkAssign = async (req, res) => {
       userId,
       assignments: subVertsRes.rows,
       timestamp: new Date().toISOString()
+    });
+
+    await logAudit(req, {
+      action: 'user.bulk_assign_subverticals',
+      targetCollection: 'users',
+      targetId: userId,
+      after: { subVerticalIds }
     });
 
     return res.status(200).json({ 

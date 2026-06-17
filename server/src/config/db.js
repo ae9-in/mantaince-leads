@@ -441,12 +441,19 @@ const runMigrations = async () => {
         CREATE INDEX IF NOT EXISTS idx_leads_csv_batch_id ON leads (csv_batch_id);
 
         -- COVERING INDEX: Lead list query satisfied entirely from the index — no heap fetch.
-        -- Covers: vertical_id filter + is_deleted filter + created_at sort
+        -- Covers: vertical_id filter + is_deleted filter + created_at sort + id sort
         -- INCLUDE columns are the exact fields returned by the list SELECT
+        DROP INDEX IF EXISTS idx_leads_list_covering;
         CREATE INDEX IF NOT EXISTS idx_leads_list_covering
-            ON leads (vertical_id, created_at DESC)
-            INCLUDE (id, name, phone, business_name, status, assigned_to, sub_vertical_id, updated_at)
+            ON leads (vertical_id, created_at DESC, id DESC)
+            INCLUDE (name, phone, business_name, status, assigned_to, sub_vertical_id, updated_at)
             WHERE is_deleted = false;
+
+        -- Report optimizations: Status, Area (expression), Agent performance, Conversion trend
+        CREATE INDEX IF NOT EXISTS idx_leads_vertical_status_covering ON leads (vertical_id, status) WHERE is_deleted = false;
+        CREATE INDEX IF NOT EXISTS idx_leads_vertical_area_expr ON leads (vertical_id, (data->>'area')) WHERE is_deleted = false;
+        CREATE INDEX IF NOT EXISTS idx_leads_vertical_assigned ON leads (vertical_id, assigned_to) WHERE is_deleted = false;
+        CREATE INDEX IF NOT EXISTS idx_leads_vertical_created_status ON leads (vertical_id, created_at, status) WHERE is_deleted = false;
 
         -- PARTIAL INDEX: "My Leads" agent view — only assigned + open leads
         CREATE INDEX IF NOT EXISTS idx_leads_assigned_open

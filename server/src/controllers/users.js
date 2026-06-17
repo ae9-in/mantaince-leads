@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { query } from '../config/db.js';
 import { logAudit } from '../services/audit.js';
 import { broadcastToAll } from '../services/assignmentBroadcaster.js';
+import { cacheDelete } from '../services/cache.js';
 
 /**
  * GET /users
@@ -229,6 +230,8 @@ export const updateUser = async (req, res) => {
       after: updatedUser
     });
 
+    await cacheDelete(`user_profile:${id}`);
+
     broadcastToAll({ type: 'USER_MUTATED' });
 
     return res.status(200).json({ success: true, data: updatedUser });
@@ -282,6 +285,8 @@ export const changeUserRole = async (req, res) => {
       after: updatedUser
     });
 
+    await cacheDelete(`user_profile:${id}`);
+
     broadcastToAll({ type: 'USER_MUTATED' });
 
     return res.status(200).json({ success: true, data: updatedUser });
@@ -316,6 +321,8 @@ export const assignUserVerticals = async (req, res) => {
       before,
       after: updatedUser
     });
+
+    await cacheDelete(`user_profile:${id}`);
 
     broadcastToAll({ type: 'USER_MUTATED' });
 
@@ -382,6 +389,8 @@ export const deleteUser = async (req, res) => {
         after: null
       });
 
+      await cacheDelete(`user_profile:${id}`);
+
       broadcastToAll({ type: 'USER_MUTATED' });
 
       return res.status(200).json({ success: true, data: { message: 'User deleted permanently' } });
@@ -409,6 +418,8 @@ export const deleteUser = async (req, res) => {
         before,
         after: updatedUser
       });
+
+      await cacheDelete(`user_profile:${id}`);
 
       broadcastToAll({ type: 'USER_MUTATED' });
 

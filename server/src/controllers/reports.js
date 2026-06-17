@@ -133,23 +133,99 @@ export const getAgentPerformance = async (req, res) => {
  * Cached entries are re-used from individual endpoints if already warm.
  */
 export const getReportsSummary = async (req, res) => {
-    const { verticalId } = req.query;
+    const { verticalId, dateFrom, dateTo } = req.query;
     if (!verticalId) return res.status(400).json({ success: false, error: 'verticalId required' });
 
     try {
+        const keySuffix = `:${dateFrom ?? ''}:${dateTo ?? ''}`;
+        const statusKey = `${CacheKeys.reportStatus(verticalId)}${keySuffix}`;
+        const areaKey = `${CacheKeys.reportArea(verticalId)}${keySuffix}`;
+        const conversionKey = `${CacheKeys.reportConversion(verticalId)}${keySuffix}`;
+        const agentsKey = `${CacheKeys.reportAgents(verticalId)}${keySuffix}`;
+
         const [statusDist, areaDist, conversionTime, agentPerf] = await Promise.all([
-            withCache(CacheKeys.reportStatus(verticalId),     TTL.REPORTS, () =>
-                query('SELECT status AS _id, COUNT(*) AS count FROM leads WHERE vertical_id = $1 AND is_deleted = false GROUP BY status', [verticalId]).then(r => r.rows)
-            ),
-            withCache(CacheKeys.reportArea(verticalId),       TTL.REPORTS, () =>
-                query(`SELECT data->>'area' AS _id, COUNT(*) AS count FROM leads WHERE vertical_id = $1 AND is_deleted = false AND data ? 'area' GROUP BY data->>'area' ORDER BY count DESC LIMIT 10`, [verticalId]).then(r => r.rows)
-            ),
-            withCache(CacheKeys.reportConversion(verticalId), TTL.REPORTS, () =>
-                query(`SELECT EXTRACT(YEAR FROM created_at) AS year, EXTRACT(WEEK FROM created_at) AS week, COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'converted') AS converted FROM leads WHERE vertical_id = $1 AND is_deleted = false AND created_at >= NOW() - INTERVAL '90 days' GROUP BY year, week ORDER BY year, week`, [verticalId]).then(r => r.rows)
-            ),
-            withCache(CacheKeys.reportAgents(verticalId),     TTL.REPORTS, () =>
-                query(`SELECT u.id AS _id, u.name, u.email, COUNT(l.id) AS "totalAssigned", COUNT(l.id) FILTER (WHERE l.status = 'converted') AS converted, (CASE WHEN COUNT(l.id) > 0 THEN ROUND(COUNT(l.id) FILTER (WHERE l.status = 'converted')::numeric / COUNT(l.id) * 100, 2) ELSE 0 END)::float AS "conversionRate" FROM users u JOIN leads l ON l.assigned_to = u.id WHERE l.vertical_id = $1 AND l.is_deleted = false GROUP BY u.id, u.name, u.email ORDER BY "conversionRate" DESC`, [verticalId]).then(r => r.rows)
-            ),
+            // 1. Status Distribution
+            withCache(statusKey, TTL.REPORTS, async () => {
+                let sql = 'SELECT status AS _id, COUNT(*) AS count FROM leads WHERE vertical_id = $1 AND is_deleted = false';
+                const params = [verticalId];
+                let pIdx = 2;
+                if (dateFrom) { sql += ` AND created_at >= $${pIdx++}`; params.push(dateFrom); }
+                if (dateTo)   { sql += ` AND created_at <= $${pIdx++}`; params.push(dateTo); }
+                sql += ' GROUP BY status';
+                const r = await query(sql, params);
+                return r.rows;
+            }),
+
+            // 2. Area Distribution
+            withCache(areaKey, TTL.REPORTS, async () => {
+                let sql = `
+                    SELECT data->>'area' AS _id, COUNT(*) AS count
+                    FROM leads
+                    WHERE vertical_id = $1 AND is_deleted = false AND data ? 'area'
+                `;
+                const params = [verticalId];
+                let pIdx = 2;
+                if (dateFrom) { sql += ` AND created_at >= $${pIdx++}`; params.push(dateFrom); }
+                if (dateTo)   { sql += ` AND created_at <= $${pIdx++}`; params.push(dateTo); }
+                sql += ` GROUP BY data->>'area' ORDER BY count DESC LIMIT 10`;
+                const r = await query(sql, params);
+                return r.rows;
+            }),
+
+            // 3. Conversion Trend
+            withCache(conversionKey, TTL.REPORTS, async () => {
+                let sql = `
+                    SELECT
+                        EXTRACT(YEAR FROM created_at)  AS year,
+                        EXTRACT(WEEK FROM created_at)  AS week,
+                        COUNT(*)                       AS total,
+                        COUNT(*) FILTER (WHERE status = 'converted') AS converted
+                    FROM leads
+                    WHERE vertical_id = $1 AND is_deleted = false
+                `;
+                const params = [verticalId];
+                let pIdx = 2;
+                if (dateFrom) {
+                    sql += ` AND created_at >= $${pIdx++}`;
+                    params.push(dateFrom);
+                } else {
+                    sql += ` AND created_at >= NOW() - INTERVAL '90 days'`;
+                }
+                if (dateTo) {
+                    sql += ` AND created_at <= $${pIdx++}`;
+                    params.push(dateTo);
+                }
+                sql += ` GROUP BY year, week ORDER BY year, week`;
+                const r = await query(sql, params);
+                return r.rows;
+            }),
+
+            // 4. Agent Performance
+            withCache(agentsKey, TTL.REPORTS, async () => {
+                let sql = `
+                    SELECT
+                        u.id    AS _id,
+                        u.name,
+                        u.email,
+                        COUNT(l.id)                                               AS "totalAssigned",
+                        COUNT(l.id) FILTER (WHERE l.status = 'converted')        AS converted,
+                        (CASE
+                            WHEN COUNT(l.id) > 0
+                            THEN ROUND(COUNT(l.id) FILTER (WHERE l.status = 'converted')::numeric / COUNT(l.id) * 100, 2)
+                            ELSE 0
+                        END)::float                                               AS "conversionRate"
+                    FROM users u
+                    JOIN leads l ON l.assigned_to = u.id
+                    WHERE l.vertical_id = $1 AND l.is_deleted = false
+                `;
+                const params = [verticalId];
+                let pIdx = 2;
+                if (dateFrom) { sql += ` AND l.created_at >= $${pIdx++}`; params.push(dateFrom); }
+                if (dateTo)   { sql += ` AND l.created_at <= $${pIdx++}`; params.push(dateTo); }
+                sql += ` GROUP BY u.id, u.name, u.email ORDER BY "conversionRate" DESC`;
+                const r = await query(sql, params);
+                return r.rows;
+            }),
         ]);
 
         return res.status(200).json({

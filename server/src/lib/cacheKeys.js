@@ -7,13 +7,13 @@
 export const CacheKeys = {
     // ── Taxonomy (changes rarely) ─────────────────────────────────────────
     /** All verticals list */
-    verticals:      ()             => 'v1:verticals:all',
+    verticals:      ()             => 'verticals:list',
     /** Single vertical with its sub-verticals embedded */
     verticalFull:   (id)           => `v1:vertical:${id}:full`,
     /** Sub-verticals for one vertical */
     subVerticals:   (verticalId)   => `v1:sv:vertical:${verticalId}`,
     /** All field configs for one vertical */
-    fieldConfigs:   (verticalId)   => `v1:configs:${verticalId}:fields`,
+    fieldConfigs:   (verticalId)   => `field_configs:${verticalId}`,
 
     // ── Lead Records ─────────────────────────────────────────────────────
     /** Full lead detail (all columns + joins) */
@@ -49,12 +49,12 @@ export const CacheKeys = {
  * Grouped by expected data volatility.
  */
 export const TTL = {
-    VERTICALS:        86_400, // 24h — changes rarely
-    SUB_VERTICALS:    86_400, // 24h
-    FIELD_CONFIGS:    86_400, // 24h
-    LEAD_DETAIL:        900, // 15 min
-    LEAD_LIST_PAGE:     120, // 2 min — tolerate slight staleness for lists
-    REPORTS:            300, // 5 min — aggregations are expensive, worth caching
+    VERTICALS:            300, // 5 min (Upstash Free Tier budget)
+    SUB_VERTICALS:        300, // 5 min
+    FIELD_CONFIGS:        300, // 5 min (Upstash Free Tier budget)
+    LEAD_DETAIL:          900, // 15 min
+    LEAD_LIST_PAGE:       120, // 2 min
+    REPORTS:               60, // 60s (dashboard status / analytics stats)
 };
 
 /**

@@ -16,7 +16,7 @@ export const logAudit = async (req, { action, targetCollection, targetId, before
       }
 
       // Capture request details
-      const ip = req ? (req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '') : '';
+      const ip = req ? (req.ip || (req.headers ? req.headers['x-forwarded-for'] : null) || (req.socket ? req.socket.remoteAddress : null) || '') : '';
 
       // Create audit log entry
       await query(`

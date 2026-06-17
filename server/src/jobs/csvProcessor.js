@@ -1,7 +1,7 @@
 import { parse } from 'csv-parse/sync';
 import { query } from '../config/db.js';
 import crypto from 'crypto';
-import { invalidateOnLeadChange } from '../services/cache.js';
+import { invalidateOnLeadChange, cacheSet } from '../services/cache.js';
 import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 
 const BATCH_SIZE = 500; // Rows per bulk INSERT — balances memory and round-trips
@@ -90,18 +90,37 @@ function buildBulkInsertSql(rows, verticalId, subVerticalId, defaultAssignedTo, 
 export const processCsvJob = async (job) => {
     const { batchId, fileBufferBase64, verticalId, uploadedBy, assignedTo, subVerticalId } = job.data;
 
+    let totalRows = 0;
+    let successCount = 0;
+    let duplicateCount = 0;
+    const errors = [];
+    const validLeads = []; // Accumulate validated rows for bulk INSERT
+
     // Mark job as in-progress
     await query(
         'UPDATE csv_upload_logs SET status = $1, processing_started_at = NOW() WHERE id = $2',
         ['processing', batchId]
     );
 
+    // Initial cache state in Redis
+    await cacheSet(`csv_progress:${batchId}`, {
+        id: batchId,
+        uploaded_by: uploadedBy,
+        vertical_id: verticalId,
+        status: 'processing',
+        total_rows: 0,
+        success_count: 0,
+        failed_count: 0,
+        duplicate_count: 0,
+        errors: []
+    }, 3600);
+
     try {
         // 1. Parse CSV from the base64 buffer
         const buffer = Buffer.from(fileBufferBase64, 'base64');
         const rows   = parse(buffer, { columns: true, trim: true, skip_empty_lines: true });
 
-        const totalRows = rows.length;
+        totalRows = rows.length;
         await query('UPDATE csv_upload_logs SET total_rows = $1 WHERE id = $2', [totalRows, batchId]);
 
         if (totalRows === 0) {
@@ -109,8 +128,32 @@ export const processCsvJob = async (job) => {
                 "UPDATE csv_upload_logs SET status = 'done', processing_finished_at = NOW() WHERE id = $1",
                 [batchId]
             );
+            await cacheSet(`csv_progress:${batchId}`, {
+                id: batchId,
+                uploaded_by: uploadedBy,
+                vertical_id: verticalId,
+                status: 'done',
+                total_rows: 0,
+                success_count: 0,
+                failed_count: 0,
+                duplicate_count: 0,
+                errors: []
+            }, 3600);
             return;
         }
+
+        // Update cache with correct total rows count
+        await cacheSet(`csv_progress:${batchId}`, {
+            id: batchId,
+            uploaded_by: uploadedBy,
+            vertical_id: verticalId,
+            status: 'processing',
+            total_rows: totalRows,
+            success_count: 0,
+            failed_count: 0,
+            duplicate_count: 0,
+            errors: []
+        }, 3600);
 
         // 2. Load field configs for this vertical (one query)
         const configsRes = await query(
@@ -155,11 +198,6 @@ export const processCsvJob = async (job) => {
         const phoneSet = new Set(existingPhones);
 
         // 5. Validate all rows — build a list of valid lead objects and errors
-        let successCount   = 0;
-        let duplicateCount = 0;
-        const errors       = [];
-        const validLeads   = []; // Accumulate validated rows for bulk INSERT
-
         let rowNum = 0;
         for (const rawRow of rows) {
             rowNum++;
@@ -179,12 +217,38 @@ export const processCsvJob = async (job) => {
 
             if (!rawPhone) {
                 errors.push({ row: rowNum, reason: 'Missing phone number' });
+                if (rowNum % 100 === 0 || rowNum === totalRows) {
+                    await cacheSet(`csv_progress:${batchId}`, {
+                        id: batchId,
+                        uploaded_by: uploadedBy,
+                        vertical_id: verticalId,
+                        status: 'processing',
+                        total_rows: totalRows,
+                        success_count: 0,
+                        failed_count: errors.length,
+                        duplicate_count: duplicateCount,
+                        errors: errors
+                    }, 3600);
+                }
                 continue;
             }
 
             if (phoneSet.has(rawPhone)) {
                 duplicateCount++;
                 errors.push({ row: rowNum, reason: `Duplicate phone number: ${rawPhone}` });
+                if (rowNum % 100 === 0 || rowNum === totalRows) {
+                    await cacheSet(`csv_progress:${batchId}`, {
+                        id: batchId,
+                        uploaded_by: uploadedBy,
+                        vertical_id: verticalId,
+                        status: 'processing',
+                        total_rows: totalRows,
+                        success_count: 0,
+                        failed_count: errors.length,
+                        duplicate_count: duplicateCount,
+                        errors: errors
+                    }, 3600);
+                }
                 continue;
             }
 
@@ -224,6 +288,21 @@ export const processCsvJob = async (job) => {
 
             // Add to dedup set immediately so later rows in the same file are caught
             phoneSet.add(rawPhone);
+
+            // Periodically update progress in Redis during validation
+            if (rowNum % 100 === 0 || rowNum === totalRows) {
+                await cacheSet(`csv_progress:${batchId}`, {
+                    id: batchId,
+                    uploaded_by: uploadedBy,
+                    vertical_id: verticalId,
+                    status: 'processing',
+                    total_rows: totalRows,
+                    success_count: 0,
+                    failed_count: errors.length,
+                    duplicate_count: duplicateCount,
+                    errors: errors
+                }, 3600);
+            }
         }
 
         // 5. Bulk INSERT in chunks of BATCH_SIZE
@@ -245,6 +324,19 @@ export const processCsvJob = async (job) => {
             // Report progress back to Bull
             const progress = Math.round(((i + chunk.length) / validLeads.length) * 100);
             await job.progress(progress);
+
+            // Update progress in Redis during insertion
+            await cacheSet(`csv_progress:${batchId}`, {
+                id: batchId,
+                uploaded_by: uploadedBy,
+                vertical_id: verticalId,
+                status: 'processing',
+                total_rows: totalRows,
+                success_count: successCount,
+                failed_count: errors.length,
+                duplicate_count: duplicateCount,
+                errors: errors
+            }, 3600);
         }
 
         // 6. Finalize log entry
@@ -254,6 +346,19 @@ export const processCsvJob = async (job) => {
                 duplicate_count = $3, errors = $4, processing_finished_at = NOW()
             WHERE id = $5
         `, [successCount, errors.length, duplicateCount, JSON.stringify(errors), batchId]);
+
+        // Update final status to 'done' in Redis
+        await cacheSet(`csv_progress:${batchId}`, {
+            id: batchId,
+            uploaded_by: uploadedBy,
+            vertical_id: verticalId,
+            status: 'done',
+            total_rows: totalRows,
+            success_count: successCount,
+            failed_count: errors.length,
+            duplicate_count: duplicateCount,
+            errors: errors
+        }, 3600);
 
         // 7. Invalidate lead list cache for this vertical (once, not per-row)
         invalidateOnLeadChange(verticalId, null).catch(() => {});
@@ -268,10 +373,22 @@ export const processCsvJob = async (job) => {
 
     } catch (error) {
         console.error('❌ CSV Job Processing Failed:', error.message);
+        const failedErrors = errors && errors.length > 0 ? errors : [{ row: 0, reason: error.message }];
         await query(
             'UPDATE csv_upload_logs SET status = $1, errors = $2 WHERE id = $3',
-            ['failed', JSON.stringify([{ row: 0, reason: error.message }]), batchId]
+            ['failed', JSON.stringify(failedErrors), batchId]
         );
+        await cacheSet(`csv_progress:${batchId}`, {
+            id: batchId,
+            uploaded_by: uploadedBy,
+            vertical_id: verticalId,
+            status: 'failed',
+            total_rows: totalRows || 0,
+            success_count: successCount || 0,
+            failed_count: failedErrors.length,
+            duplicate_count: duplicateCount || 0,
+            errors: failedErrors
+        }, 3600).catch(() => {});
         throw error;
     }
 };

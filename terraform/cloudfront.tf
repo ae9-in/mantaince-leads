@@ -151,6 +151,13 @@ resource "aws_cloudfront_distribution" "frontend" {
     error_caching_min_ttl = 0
   }
 
+  custom_error_response {
+    error_code            = 403
+    response_code         = 200
+    response_page_path    = "/index.html"
+    error_caching_min_ttl = 0
+  }
+
   viewer_certificate {
     acm_certificate_arn      = aws_acm_certificate.admateine.arn
     ssl_support_method       = "sni-only"

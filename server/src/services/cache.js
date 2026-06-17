@@ -14,18 +14,40 @@
  */
 import { redis } from '../lib/redis.js';
 
-// ── Graceful Degradation ──────────────────────────────────────────────────────
+// ── Graceful Degradation & Self-Healing ───────────────────────────────────────
 // Track whether Upstash is reachable. On first successful operation, flips to
-// true. On any error, flips back to false so the next request hits the DB.
+// true. On any error, flips back to false and records the timestamp to enters a cooldown.
 let redisAvailable = false;
+let lastRedisErrorTime = 0;
+const COOLDOWN_MS = 15000; // 15 seconds cooldown before retrying Redis
+
+function shouldAttemptRedis() {
+    if (redisAvailable) return true;
+    if (Date.now() - lastRedisErrorTime > COOLDOWN_MS) {
+        return true;
+    }
+    return false;
+}
+
+function handleRedisSuccess() {
+    redisAvailable = true;
+}
+
+function handleRedisError(err) {
+    if (redisAvailable) {
+        console.error('[Cache] Upstash connection lost (entering cooldown):', err.message);
+    }
+    redisAvailable = false;
+    lastRedisErrorTime = Date.now();
+}
 
 // Warm-up: try a quick PING to set initial availability state.
 // This runs once at module load — non-blocking.
 redis.ping().then(() => {
-    redisAvailable = true;
+    handleRedisSuccess();
     console.log('[Cache] Upstash ready');
 }).catch((err) => {
-    redisAvailable = false;
+    handleRedisError(err);
     console.error('[Cache] Upstash unavailable on startup:', err.message);
 });
 
@@ -37,12 +59,13 @@ redis.ping().then(() => {
  * Returns null on cache miss or if Redis is unavailable.
  */
 export async function cacheGet(key) {
-    if (!redisAvailable) return null;
+    if (!shouldAttemptRedis()) return null;
     try {
         const value = await redis.get(key);
+        handleRedisSuccess();
         return value ?? null;
-    } catch {
-        redisAvailable = false;
+    } catch (err) {
+        handleRedisError(err);
         return null;
     }
 }
@@ -52,12 +75,12 @@ export async function cacheGet(key) {
  * @upstash/redis auto-serializes the value to JSON.
  */
 export async function cacheSet(key, value, ttlSeconds) {
-    if (!redisAvailable) return;
+    if (!shouldAttemptRedis()) return;
     try {
         await redis.set(key, value, { ex: ttlSeconds });
-        redisAvailable = true;
+        handleRedisSuccess();
     } catch (err) {
-        redisAvailable = false;
+        handleRedisError(err);
         console.error('[Cache] set failed:', err.message);
     }
 }
@@ -66,11 +89,13 @@ export async function cacheSet(key, value, ttlSeconds) {
  * Delete one or more specific keys.
  */
 export async function cacheDelete(...keys) {
-    if (!redisAvailable || keys.length === 0) return;
+    if (keys.length === 0 || !shouldAttemptRedis()) return;
     try {
         // @upstash/redis del accepts spread args: del(k1, k2, k3)
         await redis.del(...keys);
+        handleRedisSuccess();
     } catch (err) {
+        handleRedisError(err);
         console.error('[Cache] del failed:', err.message);
     }
 }
@@ -80,7 +105,7 @@ export async function cacheDelete(...keys) {
  * @upstash/redis scan returns [nextCursor, keys] (array, not object).
  */
 export async function cacheDeletePattern(pattern) {
-    if (!redisAvailable) return;
+    if (!shouldAttemptRedis()) return;
     try {
         let cursor = 0;
         do {
@@ -90,7 +115,9 @@ export async function cacheDeletePattern(pattern) {
                 await redis.del(...keys);
             }
         } while (cursor !== 0 && cursor !== '0');
+        handleRedisSuccess();
     } catch (err) {
+        handleRedisError(err);
         console.error('[Cache] deletePattern failed:', err.message);
     }
 }
@@ -123,13 +150,8 @@ export async function withCache(key, ttl, fetcher) {
  * Invalidate all caches touched by a lead mutation (CREATE / UPDATE / DELETE).
  */
 export async function invalidateOnLeadChange(verticalId, leadId) {
-    const singleKeys = leadId ? [`v1:lead:${leadId}:detail`] : [];
-
-    await Promise.all([
-        singleKeys.length ? cacheDelete(...singleKeys) : Promise.resolve(),
-        cacheDeletePattern(`v1:leads:${verticalId}:list:*`),
-        cacheDeletePattern(`v1:reports:${verticalId}:*`),
-    ]);
+    // Only reports need invalidation since lead list and details are not cached in Redis (budget optimization)
+    await cacheDeletePattern(`v1:reports:${verticalId}:*`);
 }
 
 /**
@@ -137,12 +159,12 @@ export async function invalidateOnLeadChange(verticalId, leadId) {
  * Pass verticalId to be surgical; omit to clear all taxonomy caches.
  */
 export async function invalidateOnTaxonomyChange(verticalId) {
-    const keys = ['v1:verticals:all'];
+    const keys = ['verticals:list'];
     if (verticalId) {
         keys.push(
             `v1:vertical:${verticalId}:full`,
             `v1:sv:vertical:${verticalId}`,
-            `v1:configs:${verticalId}:fields`,
+            `field_configs:${verticalId}`,
         );
     }
 

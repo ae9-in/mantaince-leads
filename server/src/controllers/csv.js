@@ -2,6 +2,7 @@ import { query } from '../config/db.js';
 import crypto from 'crypto';
 import { logAudit } from '../services/audit.js';
 import { csvQueue } from '../jobs/queue.js';
+import { cacheGet } from '../services/cache.js';
 
 /**
  * GET /leads/csv/template/:verticalId
@@ -133,6 +134,16 @@ export const getCsvLogs = async (req, res) => {
 export const getCsvLogById = async (req, res) => {
   const { batchId } = req.params;
   try {
+    // Check Redis cache first
+    const cached = await cacheGet(`csv_progress:${batchId}`);
+    if (cached) {
+      // Strict Vertical Scoping check
+      if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(cached.vertical_id))) {
+        return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+      }
+      return res.status(200).json({ success: true, data: cached });
+    }
+
     const logRes = await query('SELECT * FROM csv_upload_logs WHERE id = $1', [batchId]);
     const log = logRes.rows[0];
     if (!log) return res.status(404).json({ success: false, error: 'CSV log not found' });
@@ -141,7 +152,6 @@ export const getCsvLogById = async (req, res) => {
     if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(log.vertical_id))) {
       return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
     }
-
 
     return res.status(200).json({ success: true, data: log });
   } catch (error) {

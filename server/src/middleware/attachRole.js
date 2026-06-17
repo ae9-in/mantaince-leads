@@ -1,12 +1,11 @@
 import { query } from '../config/db.js';
+import { cacheGet, cacheSet } from '../services/cache.js';
 
 /**
  * AttachRole Middleware
  * Loads permissions and attaches the active role definition to the request object.
+ * Optimized with self-healing Redis cache to prevent DB queries on every request.
  */
-const userCache = new Map();
-const CACHE_TTL = 30000; // 30 seconds cache
-
 export const attachRole = async (req, res, next) => {
   if (!req.user || !req.user.sub) {
     return res.status(401).json({
@@ -16,11 +15,12 @@ export const attachRole = async (req, res, next) => {
   }
 
   const userId = req.user.sub;
-  const now = Date.now();
+  const cacheKey = `user_profile:${userId}`;
 
-  if (userCache.has(userId)) {
-    const cached = userCache.get(userId);
-    if (now < cached.expiresAt) {
+  try {
+    let cached = await cacheGet(cacheKey);
+
+    if (cached) {
       if (!cached.userDoc.is_active) {
         return res.status(403).json({
           success: false,
@@ -34,9 +34,7 @@ export const attachRole = async (req, res, next) => {
       req.user.verticalAccess = cached.combinedAccess;
       return next();
     }
-  }
 
-  try {
     const userRes = await query(`
       SELECT u.*, r.name as role_name, r.permissions,
              COALESCE(
@@ -66,11 +64,13 @@ export const attachRole = async (req, res, next) => {
       ...(Array.isArray(userDoc.assigned_verticals) ? userDoc.assigned_verticals.map(v => String(v)) : [])
     ])];
 
-    userCache.set(userId, {
+    const profileData = {
       userDoc,
-      combinedAccess,
-      expiresAt: now + CACHE_TTL
-    });
+      combinedAccess
+    };
+
+    // Cache in Redis for 10 minutes (600 seconds)
+    await cacheSet(cacheKey, profileData, 600);
 
     if (!userDoc.is_active) {
       return res.status(403).json({

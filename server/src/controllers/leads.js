@@ -87,18 +87,7 @@ export const getLeads = async (req, res) => {
         const sortCol  = ['createdAt', 'updatedAt', 'businessName', 'name', 'status'].includes(sortBy) ? SORT_COLUMN_MAP[sortBy] : 'l.created_at';
         const agentId  = req.user.role === 'agent' ? req.user.sub : null;
 
-        // ── Cache key ──────────────────────────────────────────────────────
-        const cacheHash = hashLeadListParams({
-            subVerticalId, status, assignedTo, search, area,
-            dateFrom, dateTo, sortBy, sortDir, cursor,
-            limit: limitNum, agentId, csvBatchId, leadType, stageId
-        });
-        const cacheKey = CacheKeys.leadListPage(verticalId, cacheHash);
-
-        const cached = await cacheGet(cacheKey);
-        if (cached) {
-            return res.status(200).json(cached);
-        }
+        // Upstash free tier budget optimization: paginated lead list page caching removed
 
         // ── Build WHERE clauses dynamically ───────────────────────────────
         const params  = [verticalId];
@@ -251,9 +240,6 @@ export const getLeads = async (req, res) => {
                 })() : undefined,
             }
         };
-
-        // Cache the result — fire-and-forget
-        cacheSet(cacheKey, response, TTL.LEAD_LIST_PAGE).catch(() => {});
 
         return res.status(200).json(response);
     } catch (error) {
@@ -427,54 +413,43 @@ export const getLeadById = async (req, res) => {
         return res.status(404).json({ success: false, error: 'Lead not found' });
     }
     try {
-        // Try cache first
-        const cacheKey = CacheKeys.leadDetail(id);
-        const cached   = await cacheGet(cacheKey);
+        // Upstash free tier budget optimization: individual lead detail caching removed
+        // Single query with all joins — no N+1
+        const res2 = await query(`
+            SELECT
+                l.*,
+                u.id    AS assignee_id,
+                u.name  AS assignee_name,
+                u.email AS assignee_email,
+                sv.id   AS sv_id,
+                sv.name AS sv_name,
+                v.name  AS vertical_name,
+                v.color AS vertical_color
+            FROM leads l
+            LEFT JOIN users         u  ON u.id  = l.assigned_to
+            LEFT JOIN sub_verticals sv ON sv.id = l.sub_vertical_id
+            LEFT JOIN verticals     v  ON v.id  = l.vertical_id
+            WHERE l.id = $1
+        `, [id]);
 
-        let lead;
-        if (cached) {
-            lead = cached;
-        } else {
-            // Single query with all joins — no N+1
-            const res2 = await query(`
-                SELECT
-                    l.*,
-                    u.id    AS assignee_id,
-                    u.name  AS assignee_name,
-                    u.email AS assignee_email,
-                    sv.id   AS sv_id,
-                    sv.name AS sv_name,
-                    v.name  AS vertical_name,
-                    v.color AS vertical_color
-                FROM leads l
-                LEFT JOIN users         u  ON u.id  = l.assigned_to
-                LEFT JOIN sub_verticals sv ON sv.id = l.sub_vertical_id
-                LEFT JOIN verticals     v  ON v.id  = l.vertical_id
-                WHERE l.id = $1
-            `, [id]);
-
-            lead = res2.rows[0];
-            if (!lead || lead.is_deleted) {
-                return res.status(404).json({ success: false, error: 'Lead not found' });
-            }
-
-            // Fetch custom fields values
-            const customValuesRes = await query(`
-                SELECT cf.field_key, lcv.value
-                FROM lead_custom_values lcv
-                JOIN custom_fields cf ON lcv.custom_field_id = cf.id
-                WHERE lcv.lead_id = $1
-            `, [id]);
-            
-            const customValues = {};
-            customValuesRes.rows.forEach(row => {
-                customValues[row.field_key] = row.value;
-            });
-            lead.customValues = customValues;
-
-            // Cache the full lead object
-            cacheSet(cacheKey, lead, TTL.LEAD_DETAIL).catch(() => {});
+        const lead = res2.rows[0];
+        if (!lead || lead.is_deleted) {
+            return res.status(404).json({ success: false, error: 'Lead not found' });
         }
+
+        // Fetch custom fields values
+        const customValuesRes = await query(`
+            SELECT cf.field_key, lcv.value
+            FROM lead_custom_values lcv
+            JOIN custom_fields cf ON lcv.custom_field_id = cf.id
+            WHERE lcv.lead_id = $1
+        `, [id]);
+        
+        const customValues = {};
+        customValuesRes.rows.forEach(row => {
+            customValues[row.field_key] = row.value;
+        });
+        lead.customValues = customValues;
 
 
         // RBAC checks run after fetch — cheap in-memory checks

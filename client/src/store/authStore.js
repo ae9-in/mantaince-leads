@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import axios, { injectAuthStore } from '../api/axios.js';
 
+let refreshPromise = null;
+
 // Get initial user from localStorage
 const getInitialUser = () => {
   try {
@@ -66,25 +68,35 @@ export const useAuthStore = create((set, get) => ({
   },
 
   refreshToken: async () => {
-    try {
-      const response = await axios.post('/api/v1/auth/refresh');
-      const { accessToken, user } = response.data.data;
-      localStorage.setItem('user', JSON.stringify(user));
-      set({
-        user,
-        accessToken,
-        isAuthenticated: true
-      });
-      return accessToken;
-    } catch (error) {
-      localStorage.removeItem('user');
-      set({
-        user: null,
-        accessToken: null,
-        isAuthenticated: false
-      });
-      throw error;
+    if (refreshPromise) {
+      return refreshPromise;
     }
+
+    refreshPromise = (async () => {
+      try {
+        const response = await axios.post('/api/v1/auth/refresh');
+        const { accessToken, user } = response.data.data;
+        localStorage.setItem('user', JSON.stringify(user));
+        set({
+          user,
+          accessToken,
+          isAuthenticated: true
+        });
+        return accessToken;
+      } catch (error) {
+        localStorage.removeItem('user');
+        set({
+          user: null,
+          accessToken: null,
+          isAuthenticated: false
+        });
+        throw error;
+      } finally {
+        refreshPromise = null;
+      }
+    })();
+
+    return refreshPromise;
   },
 
   setAccessToken: (token) => set({ accessToken: token }),

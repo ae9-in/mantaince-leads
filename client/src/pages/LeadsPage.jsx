@@ -760,13 +760,15 @@ export const LeadsPage = () => {
             >
               <Edit size={14} className="text-[--text-secondary]" />
             </button>
-            <button
-              type="button"
-              onClick={() => handleSingleDelete(row.original._id)}
-              className="p-2 border border-stone-200 rounded-lg hover:bg-stone-50 text-red-500"
-            >
-              <Trash2 size={14} />
-            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => handleSingleDelete(row.original._id)}
+                className="p-2 border border-stone-200 rounded-lg hover:bg-stone-50 text-red-500"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
           </div>
         ),
       },
@@ -1017,7 +1019,9 @@ export const LeadsPage = () => {
             <div className="flex flex-wrap gap-2">
               <button onClick={() => setBulkStatusModal(true)} className="px-3 py-1.5 bg-black/10 hover:bg-black/20 rounded text-xs uppercase">Change Status</button>
               <button onClick={() => setBulkAssignModal(true)} className="px-3 py-1.5 bg-black/10 hover:bg-black/20 rounded text-xs uppercase">Assign User</button>
-              <button onClick={() => setBulkDeleteDialog(true)} className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs uppercase">Delete</button>
+              {isAdmin && (
+                <button onClick={() => setBulkDeleteDialog(true)} className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs uppercase">Delete</button>
+              )}
             </div>
           </div>
         )}

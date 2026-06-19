@@ -12,11 +12,14 @@ import AuditTimeline from '../components/AuditTimeline.jsx';
 import toast from 'react-hot-toast';
 import exifr from 'exifr';
 import { useUiStore } from '../store/uiStore.js';
+import { useAuthStore } from '../store/authStore.js';
 
 export const LeadDetailPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { leadsRefreshTrigger } = useUiStore();
+  const { user } = useAuthStore();
+  const isAdmin = user?.role === 'super_admin' || user?.role === 'vertical_admin';
 
   const [lead, setLead] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -59,7 +62,7 @@ export const LeadDetailPage = () => {
       const [vertRes, subsRes, usersRes] = await Promise.all([
         axios.get(`/api/v1/verticals/${leadData.vertical_id}`),
         axios.get(`/api/v1/verticals/${leadData.vertical_id}/sub-verticals`),
-        axios.get('/api/v1/users')
+        isAdmin ? axios.get('/api/v1/users') : Promise.resolve({ data: { data: [] } })
       ]);
 
       setVerticalInfo(vertRes.data.data);

@@ -9,6 +9,6 @@ const router = express.Router();
 router.use(authenticate);
 router.use(attachRole);
 
-router.get('/', checkPermission('reports:read'), getAuditLogs);
+router.get('/', checkPermission(['reports:read', 'leads:read_own', 'leads:read']), getAuditLogs);
 
 export default router;

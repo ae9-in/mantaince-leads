@@ -7,6 +7,23 @@ import { query } from '../config/db.js';
 export const getAuditLogs = async (req, res) => {
   const { page = 1, limit = 25, action, targetId, actorId, slowOnly } = req.query;
   try {
+    // RBAC: Non-admin users are restricted to target-based audit lookups for leads they can access
+    if (req.role.name !== 'super_admin' && req.role.name !== 'vertical_admin') {
+      if (!targetId) {
+        return res.status(403).json({ success: false, error: 'Forbidden: targetId is required' });
+      }
+      const leadCheck = await query('SELECT vertical_id, assigned_to, is_deleted FROM leads WHERE id = $1', [targetId]);
+      const lead = leadCheck.rows[0];
+      if (!lead || lead.is_deleted) {
+        return res.status(404).json({ success: false, error: 'Lead not found' });
+      }
+      if (!req.user.verticalAccess || !req.user.verticalAccess.includes(lead.vertical_id)) {
+        return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+      }
+      if (req.role.name === 'agent' && lead.assigned_to !== req.user.sub) {
+        return res.status(403).json({ success: false, error: 'Access forbidden: this lead is not assigned to you' });
+      }
+    }
     let sql = `
       SELECT a.*, u.name as actor_name, u.email as actor_email 
       FROM audit_logs a

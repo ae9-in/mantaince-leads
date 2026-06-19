@@ -90,7 +90,7 @@ const createBaseDynamicDefaults = () =>
     return acc;
   }, {});
 
-const TableRow = React.memo(({ row }) => {
+const TableRow = React.memo(({ row, selected }) => {
   return (
     <tr className="border-b border-[--border] hover:bg-stone-50/50">
       {row.getVisibleCells().map((cell) => (
@@ -101,7 +101,7 @@ const TableRow = React.memo(({ row }) => {
     </tr>
   );
 }, (prevProps, nextProps) => {
-  return prevProps.row.getIsSelected() === nextProps.row.getIsSelected() &&
+  return prevProps.selected === nextProps.selected &&
          prevProps.row.original === nextProps.row.original;
 });
 
@@ -1003,7 +1003,7 @@ export const LeadsPage = () => {
               </thead>
               <tbody>
                 {table.getRowModel().rows.map((row) => (
-                  <TableRow key={row.id} row={row} />
+                  <TableRow key={row.id} row={row} selected={row.getIsSelected()} />
                 ))}
               </tbody>
             </table>

@@ -31,7 +31,7 @@ router.delete('/custom-fields/:id', checkPermission('sub_vertical:manage'), dele
 router.patch('/sub-verticals/:subVerticalId/custom-fields/reorder', checkPermission('sub_vertical:manage'), reorderCustomFields);
 
 // Sub-vertical users
-router.get('/sub-verticals/:subVerticalId/users', checkPermission('vertical:read'), getUsersBySubVertical);
+router.get('/sub-verticals/:subVerticalId/users', checkPermission(['vertical:read', 'leads:read_own']), getUsersBySubVertical);
 
 // Sub-vertical workflow stages CRUD
 router.get('/sub-verticals/:subVerticalId/stages', checkPermission('vertical:read'), getSubVerticalStages);

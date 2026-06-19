@@ -287,10 +287,7 @@ export const LeadsPage = () => {
           setColumnVisibility(nextVisibility);
         }
 
-        if (isAdmin) {
-          const usersRes = await axios.get('/api/v1/users');
-          setAgents((usersRes.data.data || []).filter((member) => member.is_active));
-        }
+        // Removed fallback user fetch from here to avoid redundancy
       } catch (err) {
         console.error('Error fetching layout metadata:', err);
       }
@@ -298,6 +295,35 @@ export const LeadsPage = () => {
 
     fetchMetadata();
   }, [activeVertical, isAdmin]);
+
+  useEffect(() => {
+    const fetchSubVerticalAgents = async () => {
+      const subId = leadFormSubVerticalId || subVerticalFilter;
+      if (subId) {
+        try {
+          const res = await axios.get(`/api/v1/admin/sub-verticals/${subId}/users`);
+          setAgents(res.data.data || []);
+        } catch (err) {
+          console.error('Error fetching sub-vertical agents:', err);
+          setAgents([]);
+        }
+      } else {
+        if (isAdmin) {
+          try {
+            const usersRes = await axios.get('/api/v1/users');
+            setAgents((usersRes.data.data || []).filter((member) => member.is_active));
+          } catch (err) {
+            console.error('Error fetching fallback agents:', err);
+            setAgents([]);
+          }
+        } else {
+          setAgents([]);
+        }
+      }
+    };
+
+    fetchSubVerticalAgents();
+  }, [leadFormSubVerticalId, subVerticalFilter, isAdmin]);
 
   useEffect(() => {
     fetchLeads();

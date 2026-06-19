@@ -504,7 +504,7 @@ export const LeadDetailPage = () => {
                 {editMode ? (
                   <select {...register('assignedTo')}>
                     <option value="">-- Unassigned --</option>
-                    {agents.map(ag => (
+                    {(watchedSubVerticalId ? subVerticalUsers : agents).map(ag => (
                       <option key={ag.id} value={ag.id}>{ag.name}</option>
                     ))}
                   </select>

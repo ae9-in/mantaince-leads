@@ -54,29 +54,34 @@ export const LeadDetailPage = () => {
   // Load Lead details and taxonomy metadata
   const fetchLeadDetail = async (shouldResetForm = true) => {
     try {
-      const response = await axios.get(`/api/v1/leads/${id}`);
-      const leadData = response.data.data;
-      setLead(leadData);
+      // 1. Fetch Lead details and follow-ups in parallel (the first level of the waterfall)
+      const [leadRes, followUpsRes, summaryRes] = await Promise.all([
+        axios.get(`/api/v1/leads/${id}`),
+        axios.get(`/api/v1/followUps/leads/${id}/follow-ups`),
+        axios.get(`/api/v1/followUps/leads/${id}/follow-ups/summary`)
+      ]);
       
-      // Load dropdowns based on vertical
-      const [vertRes, subsRes, usersRes] = await Promise.all([
+      const leadData = leadRes.data.data;
+      setLead(leadData);
+      setFollowUps(followUpsRes.data.data || []);
+      setFollowUpSummary(summaryRes.data.data || null);
+      
+      // 2. Fetch all dropdowns, custom fields, stages, and sub-vertical users in a single parallel block
+      const subId = leadData.sub_vertical_id;
+      const [vertRes, subsRes, usersRes, fieldsRes, stagesRes, subUsersRes] = await Promise.all([
         axios.get(`/api/v1/verticals/${leadData.vertical_id}`),
         axios.get(`/api/v1/verticals/${leadData.vertical_id}/sub-verticals`),
-        isAdmin ? axios.get('/api/v1/users') : Promise.resolve({ data: { data: [] } })
+        isAdmin ? axios.get('/api/v1/users') : Promise.resolve({ data: { data: [] } }),
+        subId ? axios.get(`/api/v1/admin/sub-verticals/${subId}/custom-fields`) : Promise.resolve({ data: { data: [] } }),
+        subId ? axios.get(`/api/v1/admin/sub-verticals/${subId}/stages`) : Promise.resolve({ data: { data: [] } }),
+        subId ? axios.get(`/api/v1/admin/sub-verticals/${subId}/users`) : Promise.resolve({ data: { data: [] } })
       ]);
 
       setVerticalInfo(vertRes.data.data);
       setSubVerticals(subsRes.data.data.filter(s => s.isActive));
       setAgents(usersRes.data.data.filter(u => u.is_active && (u.role_name === 'agent' || u.role_name === 'vertical_admin')));
 
-      // Load sub-vertical specific configs if assigned
-      const subId = leadData.sub_vertical_id;
       if (subId) {
-        const [fieldsRes, stagesRes, subUsersRes] = await Promise.all([
-          axios.get(`/api/v1/admin/sub-verticals/${subId}/custom-fields`),
-          axios.get(`/api/v1/admin/sub-verticals/${subId}/stages`),
-          axios.get(`/api/v1/admin/sub-verticals/${subId}/users`)
-        ]);
         setCustomFields((fieldsRes.data.data || []).filter(f => f.is_active !== false));
         setStages(stagesRes.data.data);
         setSubVerticalUsers(subUsersRes.data.data);
@@ -85,14 +90,6 @@ export const LeadDetailPage = () => {
         setStages([]);
         setSubVerticalUsers([]);
       }
-
-      // Load follow ups
-      const [followUpsRes, summaryRes] = await Promise.all([
-        axios.get(`/api/v1/followUps/leads/${id}/follow-ups`),
-        axios.get(`/api/v1/followUps/leads/${id}/follow-ups/summary`)
-      ]);
-      setFollowUps(followUpsRes.data.data || []);
-      setFollowUpSummary(summaryRes.data.data || null);
 
       if (shouldResetForm) {
         // Prepopulate form fields

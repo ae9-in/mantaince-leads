@@ -40,7 +40,7 @@
   }
 
   /* Global form element overrides */
-  input, select, textarea {
+  input:not([type="checkbox"]):not([type="radio"]), select, textarea {
     background: var(--bg-input);
     border: 1px solid var(--border-strong);
     border-radius: var(--radius);
@@ -52,7 +52,7 @@
     width: 100%;
   }
 
-  input:focus, select:focus, textarea:focus {
+  input:not([type="checkbox"]):not([type="radio"]):focus, select:focus, textarea:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-light);
   }

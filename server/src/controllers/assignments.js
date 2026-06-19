@@ -55,7 +55,7 @@ export const bulkAssign = async (req, res) => {
 
     // 3. Fetch full fresh list for broadcast
     const subVertsRes = await query(`
-      SELECT sv.*, v.name as vertical_name 
+      SELECT sv.*, v.name as vertical_name, v.color as vertical_color 
       FROM sub_verticals sv 
       JOIN verticals v ON sv.vertical_id = v.id 
       WHERE sv.id = ANY($1)
@@ -91,7 +91,7 @@ export const bulkAssign = async (req, res) => {
 export const getMySubVerticals = async (req, res) => {
   try {
     const subVertsRes = await query(`
-      SELECT sv.*, v.name as vertical_name 
+      SELECT sv.*, v.name as vertical_name, v.color as vertical_color 
       FROM sub_verticals sv 
       JOIN verticals v ON sv.vertical_id = v.id 
       JOIN user_assignments ua ON sv.id = ua.sub_vertical_id 

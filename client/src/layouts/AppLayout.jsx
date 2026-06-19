@@ -260,8 +260,8 @@ export const AppLayout = () => {
                       ? 'bg-[--accent-light] text-[--accent]'
                       : 'text-[--text-secondary] hover:bg-stone-100'
                   }`}>
-                  <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: sub.verticalId?.color || 'var(--accent)' }} />
-                  {!sidebarCollapsed && <span className="truncate">{sub.name}</span>}
+                  <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: sub.verticalColor || 'var(--accent)' }} />
+                  {!sidebarCollapsed && <span className="truncate">{sub.name} ({sub.verticalName})</span>}
                 </Link>
               ))}
             </div>
@@ -316,8 +316,8 @@ export const AppLayout = () => {
                           ? 'bg-[--accent-light] text-[--accent]'
                           : 'text-[--text-secondary] hover:bg-stone-100'
                       }`}>
-                      <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: sub.verticalId?.color || 'var(--accent)' }} />
-                      <span className="truncate">{sub.name}</span>
+                      <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: sub.verticalColor || 'var(--accent)' }} />
+                      <span className="truncate">{sub.name} ({sub.verticalName})</span>
                     </Link>
                   ))}
                 </div>

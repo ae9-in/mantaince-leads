@@ -24,7 +24,7 @@ router.use(authenticate);
 router.use(attachRole);
 
 // Sub-vertical custom fields CRUD
-router.get('/sub-verticals/:subVerticalId/custom-fields', checkPermission('vertical:read'), getCustomFields);
+router.get('/sub-verticals/:subVerticalId/custom-fields', checkPermission(['vertical:read', 'leads:read_own', 'leads:read']), getCustomFields);
 router.post('/sub-verticals/:subVerticalId/custom-fields', checkPermission('sub_vertical:manage'), createCustomField);
 router.patch('/custom-fields/:id', checkPermission('sub_vertical:manage'), updateCustomField);
 router.delete('/custom-fields/:id', checkPermission('sub_vertical:manage'), deleteCustomField);
@@ -34,7 +34,7 @@ router.patch('/sub-verticals/:subVerticalId/custom-fields/reorder', checkPermiss
 router.get('/sub-verticals/:subVerticalId/users', checkPermission(['vertical:read', 'leads:read_own']), getUsersBySubVertical);
 
 // Sub-vertical workflow stages CRUD
-router.get('/sub-verticals/:subVerticalId/stages', checkPermission('vertical:read'), getSubVerticalStages);
+router.get('/sub-verticals/:subVerticalId/stages', checkPermission(['vertical:read', 'leads:read_own', 'leads:read']), getSubVerticalStages);
 router.post('/sub-verticals/:subVerticalId/stages', checkPermission('sub_vertical:manage'), createSubVerticalStage);
 router.patch('/stages/:id', checkPermission('sub_vertical:manage'), updateSubVerticalStage);
 router.delete('/stages/:id', checkPermission('sub_vertical:manage'), deleteSubVerticalStage);

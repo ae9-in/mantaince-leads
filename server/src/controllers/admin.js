@@ -25,6 +25,16 @@ export const getUsersBySubVertical = async (req, res) => {
 export const getCustomFields = async (req, res) => {
   const { subVerticalId } = req.params;
   try {
+    // RBAC: Non-admin users can only view custom fields of sub-verticals they are assigned to
+    if (req.role.name !== 'super_admin' && req.role.name !== 'vertical_admin') {
+      const assignCheck = await query(
+        'SELECT 1 FROM user_assignments WHERE user_id = $1 AND sub_vertical_id = $2 AND is_active = true',
+        [req.user.sub, subVerticalId]
+      );
+      if (assignCheck.rows.length === 0) {
+        return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this sub-vertical' });
+      }
+    }
     const result = await query(`
       SELECT * FROM custom_fields 
       WHERE sub_vertical_id = $1 AND is_deleted = false 
@@ -353,6 +363,16 @@ export const getAdminAuditLogs = async (req, res) => {
 export const getSubVerticalStages = async (req, res) => {
   const { subVerticalId } = req.params;
   try {
+    // RBAC: Non-admin users can only view stages of sub-verticals they are assigned to
+    if (req.role.name !== 'super_admin' && req.role.name !== 'vertical_admin') {
+      const assignCheck = await query(
+        'SELECT 1 FROM user_assignments WHERE user_id = $1 AND sub_vertical_id = $2 AND is_active = true',
+        [req.user.sub, subVerticalId]
+      );
+      if (assignCheck.rows.length === 0) {
+        return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this sub-vertical' });
+      }
+    }
     const result = await query(`
       SELECT * FROM lead_stages 
       WHERE sub_vertical_id = $1 

@@ -565,7 +565,64 @@ const runMigrations = async () => {
         console.error('❌ Phase 3 Migration Error:', err.message);
     }
 
+    // ── Phase 4: Cleanup & Composite Indexes ─────────────────────────────────
+    const cleanupAndIndexDdl = `
+        -- Drop legacy/dummy triggers
+        DROP TRIGGER IF EXISTS trg_sync_business_details ON businesses CASCADE;
+        DROP TRIGGER IF EXISTS trigger_businesses_updated_at ON businesses CASCADE;
+        DROP TRIGGER IF EXISTS trigger_calls_updated_at ON calls CASCADE;
+        DROP TRIGGER IF EXISTS trigger_followups_updated_at ON followups CASCADE;
+        DROP TRIGGER IF EXISTS trigger_meetings_updated_at ON meetings CASCADE;
+        DROP TRIGGER IF EXISTS trigger_summaries_updated_at ON call_summaries CASCADE;
+        DROP TRIGGER IF EXISTS trigger_transcripts_updated_at ON call_transcripts CASCADE;
+
+        -- Drop legacy/dummy functions
+        DROP FUNCTION IF EXISTS sync_business_details() CASCADE;
+        DROP FUNCTION IF EXISTS update_updated_at() CASCADE;
+
+        -- Drop legacy/dummy tables (in dependency order)
+        DROP TABLE IF EXISTS duplicate_checks CASCADE;
+        DROP TABLE IF EXISTS employee_businesses CASCADE;
+        DROP TABLE IF EXISTS employee_custom_timings CASCADE;
+        DROP TABLE IF EXISTS employee_doubts CASCADE;
+        DROP TABLE IF EXISTS employee_reports CASCADE;
+        DROP TABLE IF EXISTS report_answers CASCADE;
+        DROP TABLE IF EXISTS business_notes CASCADE;
+        DROP TABLE IF EXISTS business_tags CASCADE;
+        DROP TABLE IF EXISTS business_timings CASCADE;
+        DROP TABLE IF EXISTS businesses CASCADE;
+        DROP TABLE IF EXISTS call_notes CASCADE;
+        DROP TABLE IF EXISTS call_summaries CASCADE;
+        DROP TABLE IF EXISTS call_transcripts CASCADE;
+        DROP TABLE IF EXISTS calls CASCADE;
+        DROP TABLE IF EXISTS crm_audit_logs CASCADE;
+        DROP TABLE IF EXISTS followups CASCADE;
+        DROP TABLE IF EXISTS form_fields CASCADE;
+        DROP TABLE IF EXISTS locations CASCADE;
+        DROP TABLE IF EXISTS meetings CASCADE;
+        DROP TABLE IF EXISTS notifications CASCADE;
+        DROP TABLE IF EXISTS refresh_tokens CASCADE;
+        DROP TABLE IF EXISTS targets CASCADE;
+        DROP TABLE IF EXISTS tags CASCADE;
+        DROP TABLE IF EXISTS activities CASCADE;
+        DROP TABLE IF EXISTS activity_types CASCADE;
+        DROP TABLE IF EXISTS ai_settings CASCADE;
+
+        -- Composite Indexes for Audit Logs filtering + sorting performance
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_created_at ON audit_logs (actor_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_action_created_at ON audit_logs (action, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_target_created_at ON audit_logs (target_collection, created_at DESC);
+    `;
+
+    try {
+        await query(cleanupAndIndexDdl);
+        console.log('✅ Phase 4: Cleanup & Composite Indexes migrations completed.');
+    } catch (err) {
+        console.error('❌ Phase 4 Migration Error:', err.message);
+    }
+
     console.log('✅ All database migrations completed.');
 };
 
 export default pool;
+

@@ -53,16 +53,62 @@ redis.ping().then(() => {
 
 // ── Primitives ────────────────────────────────────────────────────────────────
 
+// Simple L1 cache (in-process memory)
+const l1Cache = new Map();
+
+function l1Get(key) {
+    const entry = l1Cache.get(key);
+    if (!entry) return null;
+    if (Date.now() > entry.expiry) {
+        l1Cache.delete(key);
+        return null;
+    }
+    return entry.value;
+}
+
+function l1Set(key, value, ttlSeconds) {
+    l1Cache.set(key, {
+        value,
+        expiry: Date.now() + (ttlSeconds * 1000)
+    });
+}
+
+function l1Delete(key) {
+    l1Cache.delete(key);
+}
+
+function l1DeletePattern(pattern) {
+    // Convert glob-like pattern to regex (e.g. 'v1:reports:*:*' -> /^v1:reports:.*:.*$/)
+    const regexStr = '^' + pattern
+        .replace(/[-\/\\^$*+?.()|[\]{}]/g, (ch) => (ch === '*' ? '.*' : '\\' + ch)) + '$';
+    const regex = new RegExp(regexStr);
+    for (const key of l1Cache.keys()) {
+        if (regex.test(key)) {
+            l1Cache.delete(key);
+        }
+    }
+}
+
 /**
  * Get a cached value.
  * @upstash/redis already deserializes JSON — returns the parsed value directly.
  * Returns null on cache miss or if Redis is unavailable.
  */
 export async function cacheGet(key) {
+    // Check L1 Cache first
+    const l1Hit = l1Get(key);
+    if (l1Hit !== null) {
+        return l1Hit;
+    }
+
     if (!shouldAttemptRedis()) return null;
     try {
         const value = await redis.get(key);
         handleRedisSuccess();
+        if (value !== null && value !== undefined) {
+            // Populate L1 cache (using default of 5 minutes TTL for L1)
+            l1Set(key, value, 300);
+        }
         return value ?? null;
     } catch (err) {
         handleRedisError(err);
@@ -75,6 +121,9 @@ export async function cacheGet(key) {
  * @upstash/redis auto-serializes the value to JSON.
  */
 export async function cacheSet(key, value, ttlSeconds) {
+    // Set in L1 first
+    l1Set(key, value, ttlSeconds);
+
     if (!shouldAttemptRedis()) return;
     try {
         await redis.set(key, value, { ex: ttlSeconds });
@@ -89,6 +138,9 @@ export async function cacheSet(key, value, ttlSeconds) {
  * Delete one or more specific keys.
  */
 export async function cacheDelete(...keys) {
+    for (const key of keys) {
+        l1Delete(key);
+    }
     if (keys.length === 0 || !shouldAttemptRedis()) return;
     try {
         // @upstash/redis del accepts spread args: del(k1, k2, k3)
@@ -105,6 +157,7 @@ export async function cacheDelete(...keys) {
  * @upstash/redis scan returns [nextCursor, keys] (array, not object).
  */
 export async function cacheDeletePattern(pattern) {
+    l1DeletePattern(pattern);
     if (!shouldAttemptRedis()) return;
     try {
         let cursor = 0;
@@ -173,4 +226,11 @@ export async function invalidateOnTaxonomyChange(verticalId) {
         cacheDeletePattern('v1:vertical:*:full'),
         cacheDeletePattern('v1:sv:vertical:*'),
     ]);
+}
+
+/**
+ * Flush L1 Cache (mainly for testing environment cleanup)
+ */
+export function flushL1Cache() {
+    l1Cache.clear();
 }

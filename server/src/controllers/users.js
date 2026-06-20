@@ -86,18 +86,21 @@ export const getUsers = async (req, res) => {
 export const inviteUser = async (req, res) => {
   const { name, email, role, password, verticalAccess = [] } = req.body;
   try {
-    const existsRes = await query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
+    const [existsRes, roleRes, passwordHash] = await Promise.all([
+      query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]),
+      query('SELECT id FROM roles WHERE name = $1', [role]),
+      bcrypt.hash(password, 12)
+    ]);
+
     if (existsRes.rows.length > 0) {
       return res.status(400).json({ success: false, error: 'User with this email already exists' });
     }
 
-    const roleRes = await query('SELECT id FROM roles WHERE name = $1', [role]);
     const roleDoc = roleRes.rows[0];
     if (!roleDoc) {
       return res.status(400).json({ success: false, error: 'Role not found' });
     }
 
-    const passwordHash = await bcrypt.hash(password, 12);
     const userId = crypto.randomUUID();
     
     // Strict Vertical Scoping check for vertical_admin

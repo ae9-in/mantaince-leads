@@ -87,9 +87,32 @@ export const connectDB = async () => {
     }
 };
 
+const checkSchemaReady = async () => {
+    try {
+        const res = await pool.query(`
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'leads' AND column_name = 'stage_id'
+            ) AND EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'sessions' AND column_name = 'token_hash'
+            ) AS ready;
+        `);
+        return res.rows[0]?.ready || false;
+    } catch (err) {
+        console.log('⚠️ Schema check failed, running migrations anyway:', err.message);
+        return false;
+    }
+};
+
 // ── Migrations ────────────────────────────────────────────────────────────────
 // Split into 3 phases so a transient error in phase 2/3 never blocks phase 1.
 const runMigrations = async () => {
+    const isReady = await checkSchemaReady();
+    if (isReady && process.env.FORCE_MIGRATIONS !== 'true') {
+        console.log('🏗️ Database schema is already up-to-date. Skipping core migrations.');
+        return;
+    }
     console.log('🏗️ Running database migrations...');
 
     // ── Phase 1: Core Schema ─────────────────────────────────────────────────
@@ -360,7 +383,17 @@ const runMigrations = async () => {
         ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;
         ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_agent TEXT;
         ALTER TABLE sessions ADD COLUMN IF NOT EXISTS ip VARCHAR(50);
-        ALTER TABLE sessions ALTER COLUMN token DROP NOT NULL;
+        
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'sessions' AND column_name = 'token'
+            ) THEN
+                ALTER TABLE sessions ALTER COLUMN token DROP NOT NULL;
+            END IF;
+        END $$;
+
         ALTER TABLE sessions ALTER COLUMN user_id SET NOT NULL;
 
         ALTER TABLE verticals ADD COLUMN IF NOT EXISTS color VARCHAR(50) DEFAULT '#185FA5';

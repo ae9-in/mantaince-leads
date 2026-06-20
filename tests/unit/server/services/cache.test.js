@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { cacheGet, cacheSet, cacheDelete, cacheDeletePattern, withCache } from '../../../../server/src/services/cache.js';
+import { cacheGet, cacheSet, cacheDelete, cacheDeletePattern, withCache, flushL1Cache } from '../../../../server/src/services/cache.js';
 import { redis } from '../../../../server/src/lib/redis.js';
 
 vi.mock('../../../../server/src/lib/redis.js', () => ({
@@ -15,6 +15,7 @@ vi.mock('../../../../server/src/lib/redis.js', () => ({
 describe('cache.withCache', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    flushL1Cache();
   });
 
   it('tries to call redis.get and returns the cached value', async () => {

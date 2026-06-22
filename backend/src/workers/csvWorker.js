@@ -16,6 +16,8 @@ const BASE_DYNAMIC_HEADER_MAP = new Map([
   ['convertedstatus', { key: 'convertedStatus', fieldType: 'text' }],
   ['delivered location', { key: 'deliveredLocation', fieldType: 'text' }],
   ['deliveredlocation', { key: 'deliveredLocation', fieldType: 'text' }],
+  ['delivered location (google maps location)', { key: 'deliveredLocation', fieldType: 'text' }],
+  ['deliveredlocation(googlemapslocation)', { key: 'deliveredLocation', fieldType: 'text' }],
   ['delivered link', { key: 'deliveredLink', fieldType: 'url' }],
   ['deliveredlink', { key: 'deliveredLink', fieldType: 'url' }]
 ]);
@@ -160,6 +162,7 @@ class CsvQueue {
         let name = '';
         let phone = '';
         let businessName = '';
+        let status = 'new';
         const customData = {};
 
         // Track validation errors for this row
@@ -177,6 +180,11 @@ class CsvQueue {
             phone = rawVal;
           } else if (normKey === 'business' || normKey === 'business name' || normKey === 'businessname') {
             businessName = rawVal;
+          } else if (normKey === 'status') {
+            const rawStatus = rawVal.toLowerCase().trim();
+            if (['new', 'contacted', 'converted', 'lost'].includes(rawStatus)) {
+              status = rawStatus;
+            }
           } else if (BASE_DYNAMIC_HEADER_MAP.has(normKey)) {
             const baseField = BASE_DYNAMIC_HEADER_MAP.get(normKey);
             const coerced = coerceValue(rawVal, baseField.fieldType);
@@ -241,7 +249,7 @@ class CsvQueue {
           phone: phone || undefined,
           businessName: businessName || undefined,
           data: customData,
-          status: 'new',
+          status,
           source: 'csv_upload',
           csvBatchId: logId
         });

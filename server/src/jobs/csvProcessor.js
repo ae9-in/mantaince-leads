@@ -39,11 +39,11 @@ const sanitizePhone = (phone) => {
  * @returns {{ sql: string, params: Array }}
  */
 function buildBulkInsertSql(rows, verticalId, subVerticalId, defaultAssignedTo, uploadedBy, batchId) {
-    const COLS_PER_ROW = 10;
+    const COLS_PER_ROW = 12;
     const colNames = [
         'id', 'vertical_id', 'sub_vertical_id', 'assigned_to',
         'uploaded_by', 'name', 'phone', 'business_name',
-        'data', 'csv_batch_id'
+        'data', 'csv_batch_id', 'lead_type', 'status'
     ];
 
     const valuePlaceholders = [];
@@ -66,7 +66,9 @@ function buildBulkInsertSql(rows, verticalId, subVerticalId, defaultAssignedTo, 
             row.phone,
             row.businessName,
             JSON.stringify(row.data),
-            batchId
+            batchId,
+            row.leadType || 'CALL',
+            row.status || 'new'
         );
     }
 
@@ -261,11 +263,24 @@ export const processCsvJob = async (job) => {
             const empSpokenRaw = row['employee spoken'] || row['employee'] || row['spoken'] || '';
             dataMap['employeeSpoken'] = empSpokenRaw;
             dataMap['convertedStatus'] = row['converted status'] || row['converted'] || '';
-            dataMap['deliveredLocation'] = row['delivered location'] || row['delivered'] || row['location'] || row['area'] || '';
+            dataMap['deliveredLocation'] = row['delivered location (google maps location)'] || row['delivered location'] || row['delivered'] || row['location'] || row['area'] || '';
             dataMap['deliveredLink'] = row['delivered link'] || row['link'] || '';
 
             const empSpokenName = empSpokenRaw.toLowerCase().trim();
             const rowAssignedTo = agentMap.get(empSpokenName) || null;
+
+            // Parse lead type and status
+            const rawLeadType = row['lead type'] || row['type'] || 'CALL';
+            let leadTypeVal = 'CALL';
+            if (rawLeadType.toLowerCase().includes('field')) {
+                leadTypeVal = 'FIELD';
+            }
+
+            const rawStatus = (row['status'] || 'new').toLowerCase().trim();
+            let statusVal = 'new';
+            if (['new', 'contacted', 'converted', 'lost'].includes(rawStatus)) {
+                statusVal = rawStatus;
+            }
 
             for (const cfg of configs) {
                 const header = (cfg.csv_header || cfg.label).toLowerCase().trim();
@@ -283,7 +298,9 @@ export const processCsvJob = async (job) => {
             validLeads.push({
                 name: rawName, phone: rawPhone,
                 businessName: rawBusiness, data: dataMap,
-                assignedTo: rowAssignedTo
+                assignedTo: rowAssignedTo,
+                leadType: leadTypeVal,
+                status: statusVal
             });
 
             // Add to dedup set immediately so later rows in the same file are caught

@@ -26,17 +26,50 @@ export const downloadCsvTemplate = async (req, res) => {
     const configs = configsRes.rows;
 
     const baseHeaders = [
-      'Name', 'Number', 'Business', 'Employee Spoken', 
-      'Converted', 'Delivered', 'Location', 'Area', 'Link', 
-      'Google Form', 'Google Drive'
+      'Name',
+      'Number',
+      'Business',
+      'Employee Spoken',
+      'Lead Type',
+      'Status',
+      'Name Business',
+      'Date',
+      'Delivered Location (Google Maps Location)',
+      'Delivered Link'
+    ];
+
+    const baseExample = [
+      'John Doe',
+      '+1234567890',
+      'Acme Corp',
+      'Jane Smith',
+      'Calls',
+      'New',
+      'Acme Corp Office',
+      '2026-06-22',
+      'https://maps.google.com/?q=12.345,67.890',
+      'https://example.com/delivered/report123'
     ];
 
     const customHeaders = configs.map(c => c.csv_header || c.label);
     const headers = [...baseHeaders, ...customHeaders];
 
+    const customExamples = configs.map(c => {
+      if (c.field_type === 'number') return '123';
+      if (c.field_type === 'boolean') return 'True';
+      if (c.field_type === 'date') return '2026-06-22';
+      return 'Sample Value';
+    });
+    const exampleRow = [...baseExample, ...customExamples];
+
+    const csvContent = [
+      headers.map(h => `"${h.replace(/"/g, '""')}"`).join(','),
+      exampleRow.map(v => `"${v.replace(/"/g, '""')}"`).join(',')
+    ].join('\n') + '\n';
+
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename=template-${vertical.slug}.csv`);
-    return res.status(200).send(headers.join(',') + '\n');
+    return res.status(200).send(csvContent);
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }

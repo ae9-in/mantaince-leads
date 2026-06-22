@@ -359,16 +359,54 @@ const LeadsView = () => {
 
   const handleDownloadTemplate = () => {
     // Generate template CSV based on current configurations
-    const headers = ['Name', 'Phone', 'Business Name'];
+    const baseHeaders = [
+      'Name',
+      'Number',
+      'Business',
+      'Employee Spoken',
+      'Lead Type',
+      'Status',
+      'Name Business',
+      'Date',
+      'Delivered Location (Google Maps Location)',
+      'Delivered Link'
+    ];
+
+    const baseExample = [
+      'John Doe',
+      '+1234567890',
+      'Acme Corp',
+      'Jane Smith',
+      'Calls',
+      'New',
+      'Acme Corp Office',
+      '2026-06-22',
+      'https://maps.google.com/?q=12.345,67.890',
+      'https://example.com/delivered/report123'
+    ];
+
+    const headers = [...baseHeaders];
+    const exampleRow = [...baseExample];
+
     configs.forEach(c => {
-      if (c.isCsvMapped && c.csvHeader) {
-        headers.push(c.csvHeader);
+      const header = c.isCsvMapped && c.csvHeader ? c.csvHeader : c.label;
+      headers.push(header);
+      if (c.fieldType === 'number') {
+        exampleRow.push('123');
+      } else if (c.fieldType === 'boolean') {
+        exampleRow.push('True');
+      } else if (c.fieldType === 'date') {
+        exampleRow.push('2026-06-22');
       } else {
-        headers.push(c.label);
+        exampleRow.push('Sample Value');
       }
     });
 
-    const csvContent = headers.map(h => `"${h.replace(/"/g, '""')}"`).join(',') + '\n';
+    const csvContent = [
+      headers.map(h => `"${h.replace(/"/g, '""')}"`).join(','),
+      exampleRow.map(v => `"${v.replace(/"/g, '""')}"`).join(',')
+    ].join('\n') + '\n';
+
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');

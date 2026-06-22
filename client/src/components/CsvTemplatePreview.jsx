@@ -31,9 +31,16 @@ export const CsvTemplatePreview = ({ verticalId }) => {
   if (!verticalId) return null;
 
   const baseHeaders = [
-    'Name', 'Number', 'Business', 'Employee', 'Spoken', 
-    'Converted', 'Delivered', 'Location', 'Area', 'Link', 
-    'Google Form', 'Google Drive'
+    'Name',
+    'Number',
+    'Business',
+    'Employee Spoken',
+    'Lead Type',
+    'Status',
+    'Name Business',
+    'Date',
+    'Delivered Location (Google Maps Location)',
+    'Delivered Link'
   ];
 
   const customHeaders = fields.map(f => f.csvHeader || f.label);

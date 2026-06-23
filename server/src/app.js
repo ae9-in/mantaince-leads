@@ -6,7 +6,7 @@ import compression from 'compression';
 import { PORT, CLIENT_URL } from './config/env.js';
 import pool, { connectDB } from './config/db.js';
 import performanceMonitor from './middleware/performance.js';
-import { connectAllRedisClients } from './lib/redis.js';
+import { timingMiddleware } from './middleware/timing.js';
 import { closeAllClients } from './services/assignmentBroadcaster.js';
 
 // Route imports
@@ -33,14 +33,29 @@ const app = express();
 
 // 1. Performance and Optimization Middleware
 app.use(performanceMonitor);
-app.use(compression());
+app.use(timingMiddleware);
+app.use(compression({
+  threshold: 1024,
+  level: 6,
+  filter: (req, res) => {
+    if (req.headers.accept === 'text/event-stream') {
+      return false;
+    }
+    return compression.filter(req, res);
+  }
+}));
 
-// 2. Establish DB + Redis Connections
-connectDB();
-// Redis: non-fatal — cache will degrade gracefully if unavailable
-connectAllRedisClients().catch((err) => {
-  console.error('[Redis] Startup connection failed (non-fatal):', err.message);
+// Vary: Accept-Encoding & Security Headers
+app.use((req, res, next) => {
+  res.setHeader('Vary', 'Accept-Encoding');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  next();
 });
+
+console.log('✓ Compression: gzip active (threshold 1KB)');
+
+// 2. Establish DB Connections
+connectDB();
 
 // 3. Register Security & Parsing Middlewares
 app.use(helmet({
@@ -136,8 +151,20 @@ app.use('/api/v1/assignments', assignmentsRouter);
 app.use('/api/v1/admin', adminRouter);
 app.use('/api/v1/followUps', followUpsRouter);
 
-// Serve static uploads
-app.use('/uploads', express.static(path.join(__dirname, '../../uploads')));
+// Serve static uploads with caching headers
+app.use('/uploads', express.static(path.join(__dirname, '../../uploads'), {
+  maxAge: '1d', // 1 day public cache
+  etag: true,
+  lastModified: true
+}));
+
+// Compression verification endpoint
+app.get('/api/v1/compression-test-payload', (req, res) => {
+  res.json({
+    message: 'This is a large test payload to verify response compression is active on the server.',
+    data: 'a'.repeat(2000)
+  });
+});
 
 // Lightweight status checkpoint endpoint
 app.get('/health', (req, res) => {

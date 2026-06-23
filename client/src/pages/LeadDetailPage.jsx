@@ -10,7 +10,6 @@ import axios from '../api/axios.js';
 import StatusBadge from '../components/StatusBadge.jsx';
 import AuditTimeline from '../components/AuditTimeline.jsx';
 import toast from 'react-hot-toast';
-import exifr from 'exifr';
 import { useUiStore } from '../store/uiStore.js';
 import { useAuthStore } from '../store/authStore.js';
 
@@ -233,7 +232,8 @@ export const LeadDetailPage = () => {
       // 1. Attempt to extract GPS coordinates via exifr
       let lat = null, lng = null;
       try {
-        const output = await exifr.gps(file);
+        const exifrModule = await import('exifr');
+        const output = await exifrModule.default.gps(file);
         if (output && output.latitude && output.longitude) {
           lat = output.latitude;
           lng = output.longitude;

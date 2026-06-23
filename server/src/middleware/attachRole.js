@@ -4,7 +4,7 @@ import { cacheGet, cacheSet } from '../services/cache.js';
 /**
  * AttachRole Middleware
  * Loads permissions and attaches the active role definition to the request object.
- * Optimized with self-healing Redis cache to prevent DB queries on every request.
+ * Optimized with self-healing in-memory cache to prevent DB queries on every request.
  */
 export const attachRole = async (req, res, next) => {
   if (!req.user || !req.user.sub) {
@@ -69,7 +69,7 @@ export const attachRole = async (req, res, next) => {
       combinedAccess
     };
 
-    // Cache in Redis for 10 minutes (600 seconds)
+    // Cache for 10 minutes (600 seconds)
     await cacheSet(cacheKey, profileData, 600);
 
     if (!userDoc.is_active) {

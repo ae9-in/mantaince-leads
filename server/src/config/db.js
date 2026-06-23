@@ -67,7 +67,17 @@ pool.on('error', (err) => {
     console.error('❌ Idle pool client error:', err.message);
 });
 
-export const query = (text, params) => pool.query(text, params);
+import { timingContext } from '../middleware/timing.js';
+
+export const query = async (text, params) => {
+    const req = timingContext.getStore();
+    if (req?.timer) req.timer.start('db');
+    try {
+        return await pool.query(text, params);
+    } finally {
+        if (req?.timer) req.timer.end('db');
+    }
+};
 
 // ── Database Initialization ───────────────────────────────────────────────────
 export const connectDB = async () => {

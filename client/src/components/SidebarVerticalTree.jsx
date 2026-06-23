@@ -18,6 +18,7 @@ const SidebarVerticalTree = ({
   onEditVertical,
   onExpandVertical,
   onSelectVertical,
+  loading = false,
 }) => {
   const [expandedVerticals, setExpandedVerticals] = useState({});
 
@@ -27,6 +28,33 @@ const SidebarVerticalTree = ({
     setExpandedVerticals(prev => ({ ...prev, [id]: next }));
     if (next && onExpandVertical) onExpandVertical(id);
   };
+
+  // ── Loading state skeleton ─────────────────────────────────────────────────
+  if (loading) {
+    if (sidebarCollapsed) {
+      return (
+        <div className="flex flex-col items-center gap-2 py-2">
+          {[1, 2, 3].map(i => (
+            <div
+              key={i}
+              className="w-8 h-8 rounded-lg animate-pulse"
+              style={{ background: 'rgba(180,155,130,0.15)' }}
+            />
+          ))}
+        </div>
+      );
+    }
+    return (
+      <div className="space-y-2 px-3 py-2">
+        {[1, 2, 3].map(i => (
+          <div key={i} className="flex items-center gap-2 animate-pulse">
+            <div className="w-2 h-2 rounded-full shrink-0" style={{ background: 'rgba(180,155,130,0.25)' }} />
+            <div className="h-3 rounded flex-1" style={{ background: 'rgba(180,155,130,0.18)' }} />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   // ── Collapsed icon strip ──────────────────────────────────────────────────
   if (sidebarCollapsed) {

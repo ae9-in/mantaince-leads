@@ -134,7 +134,7 @@ async function seed() {
         }
 
         // 3. Clear taxonomy cache
-        console.log('🔄 Invalidating Redis cache...');
+        console.log('🔄 Invalidating cache...');
         await invalidateOnTaxonomyChange(null);
         console.log('🎉 Seeding successfully completed!');
         process.exit(0);

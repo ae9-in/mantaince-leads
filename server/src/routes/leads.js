@@ -3,6 +3,7 @@ import multer from 'multer';
 import { 
   getLeads, 
   createLead, 
+  createLeadBulk,
   getLeadById, 
   updateLead, 
   deleteLead, 
@@ -41,6 +42,7 @@ router.get('/csv/logs/:batchId/failed-rows', checkPermission('csv:logs'), stream
 // Standard Leads routes
 router.get('/', checkPermission(['leads:read', 'leads:read_own']), getLeads);
 router.post('/', checkPermission('leads:create'), createLead);
+router.post('/bulk', checkPermission('leads:create'), createLeadBulk);
 router.get('/export/csv', checkPermission(['leads:read', 'leads:read_own']), exportLeadsCsv);
 
 router.get('/:id', checkPermission(['leads:read', 'leads:read_own']), getLeadById);

@@ -91,8 +91,9 @@ const createBaseDynamicDefaults = () =>
   }, {});
 
 const TableRow = React.memo(({ row, selected }) => {
+  const isOptimistic = row.original?._optimistic;
   return (
-    <tr className="border-b border-[--border] hover:bg-stone-50/50">
+    <tr className={`border-b border-[--border] hover:bg-stone-50/50 transition-all duration-200 ${isOptimistic ? 'opacity-60 bg-blue-50/20 border-dashed border-blue-200' : ''}`} style={isOptimistic ? { outline: '1.5px dashed rgba(99,102,241,0.35)' } : {}}>
       {row.getVisibleCells().map((cell) => (
         <td key={cell.id} className="px-4 py-3 text-[--text-primary] whitespace-nowrap text-xs">
           {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -102,7 +103,8 @@ const TableRow = React.memo(({ row, selected }) => {
   );
 }, (prevProps, nextProps) => {
   return prevProps.selected === nextProps.selected &&
-         prevProps.row.original === nextProps.row.original;
+         prevProps.row.original === nextProps.row.original &&
+         prevProps.row.original?._optimistic === nextProps.row.original?._optimistic;
 });
 
 export const LeadsPage = () => {
@@ -112,17 +114,19 @@ export const LeadsPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const STATUS_OPTIONS = useMemo(() => {
-    return activeVertical?.statuses || [
-      { value: 'new', label: 'New' },
-      { value: 'contacted', label: 'Contacted' },
-      { value: 'qualified', label: 'Qualified' },
-      { value: 'visit_scheduled', label: 'Meeting Scheduled' },
-      { value: 'visit_completed', label: 'Meeting Completed' },
-      { value: 'negotiation', label: 'Negotiation' },
-      { value: 'converted', label: 'Converted' },
-      { value: 'lost', label: 'Lost' },
-      { value: 'invalid', label: 'Invalid' },
-    ];
+    return (activeVertical?.statuses && activeVertical.statuses.length > 0)
+      ? activeVertical.statuses
+      : [
+          { value: 'new', label: 'New' },
+          { value: 'contacted', label: 'Contacted' },
+          { value: 'qualified', label: 'Qualified' },
+          { value: 'visit_scheduled', label: 'Meeting Scheduled' },
+          { value: 'visit_completed', label: 'Meeting Completed' },
+          { value: 'negotiation', label: 'Negotiation' },
+          { value: 'converted', label: 'Converted' },
+          { value: 'lost', label: 'Lost' },
+          { value: 'invalid', label: 'Invalid' },
+        ];
   }, [activeVertical]);
 
   const page = parseInt(searchParams.get('page') || '1', 10);
@@ -145,6 +149,7 @@ export const LeadsPage = () => {
   const [configs, setConfigs] = useState([]);
   const [subVerticals, setSubVerticals] = useState([]);
   const [agents, setAgents] = useState([]);
+  const [allAgents, setAllAgents] = useState([]);
   const [rowSelection, setRowSelection] = useState({});
   const [searchInput, setSearchInput] = useState(search);
   const [showFilters, setShowFilters] = useState(false);
@@ -296,6 +301,25 @@ export const LeadsPage = () => {
     fetchMetadata();
   }, [activeVertical, isAdmin]);
 
+  // Prefetch fallback active agents once
+  useEffect(() => {
+    let cancelled = false;
+    const fetchAllAgents = async () => {
+      if (isAdmin && activeVertical) {
+        try {
+          const res = await axios.get('/api/v1/users');
+          if (!cancelled) {
+            setAllAgents((res.data.data || []).filter((member) => member.is_active));
+          }
+        } catch (err) {
+          console.error('Error fetching fallback agents:', err);
+        }
+      }
+    };
+    fetchAllAgents();
+    return () => { cancelled = true; };
+  }, [isAdmin, activeVertical]);
+
   useEffect(() => {
     const fetchSubVerticalAgents = async () => {
       const subId = leadFormSubVerticalId || subVerticalFilter;
@@ -309,13 +333,7 @@ export const LeadsPage = () => {
         }
       } else {
         if (isAdmin) {
-          try {
-            const usersRes = await axios.get('/api/v1/users');
-            setAgents((usersRes.data.data || []).filter((member) => member.is_active));
-          } catch (err) {
-            console.error('Error fetching fallback agents:', err);
-            setAgents([]);
-          }
+          setAgents(allAgents);
         } else {
           setAgents([]);
         }
@@ -323,7 +341,7 @@ export const LeadsPage = () => {
     };
 
     fetchSubVerticalAgents();
-  }, [leadFormSubVerticalId, subVerticalFilter, isAdmin]);
+  }, [leadFormSubVerticalId, subVerticalFilter, isAdmin, allAgents]);
 
   useEffect(() => {
     fetchLeads();
@@ -440,6 +458,46 @@ export const LeadsPage = () => {
       payload.leadType = leadFormLeadType;
     }
 
+    const previousLeads = [...leads];
+    let tempId;
+
+    if (selectedLead) {
+      const updatedLeads = leads.map(l => l._id === selectedLead._id ? {
+        ...l,
+        name: payload.name,
+        phone: payload.phone,
+        businessName: payload.businessName,
+        business_name: payload.businessName,
+        status: payload.status,
+        lead_type: payload.leadType,
+        data: { ...l.data, ...payload.data },
+        assigned_to: payload.assignedTo,
+        _optimistic: true
+      } : l);
+      setLeads(updatedLeads);
+    } else {
+      tempId = `optimistic-${Math.random().toString(36).substr(2, 9)}`;
+      const optimisticLead = {
+        _id: tempId,
+        name: payload.name,
+        phone: payload.phone,
+        businessName: payload.businessName,
+        business_name: payload.businessName,
+        status: payload.status,
+        lead_type: payload.leadType,
+        data: payload.data,
+        vertical_id: payload.verticalId,
+        sub_vertical_id: payload.subVerticalId,
+        assigned_to: payload.assignedTo,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        _optimistic: true
+      };
+      setLeads([optimisticLead, ...leads]);
+    }
+
+    setLeadModalOpen(false);
+
     try {
       let savedLead;
       if (selectedLead) {
@@ -464,10 +522,10 @@ export const LeadsPage = () => {
         toast.success('Field photo uploaded successfully.');
       }
 
-      setLeadModalOpen(false);
       fetchLeads();
     } catch (err) {
-      setFormErrors([err.response?.data?.error || 'Save failed.']);
+      setLeads(previousLeads);
+      toast.error(err.response?.data?.error || 'Save failed.');
     }
   };
 
@@ -483,48 +541,76 @@ export const LeadsPage = () => {
 
   const handleSingleDelete = (leadId) => {
     if (!window.confirm('Are you sure you want to delete this lead?')) return;
+    const previousLeads = [...leads];
+    setLeads(leads.filter(l => l._id !== leadId));
     axios.delete(`/api/v1/leads/${leadId}`)
       .then(() => {
         toast.success('Lead deleted successfully');
         fetchLeads();
       })
       .catch((err) => {
+        setLeads(previousLeads);
         toast.error(err.response?.data?.error || 'Failed to delete lead');
       });
   };
 
   const handleBulkDelete = async () => {
+    const previousLeads = [...leads];
+    setLeads(leads.filter(l => !selectedRowIds.includes(l._id)));
+    setBulkDeleteDialog(false);
+    setRowSelection({});
     try {
       await Promise.all(selectedRowIds.map((id) => axios.delete(`/api/v1/leads/${id}`)));
       toast.success(`Successfully deleted ${selectedRowIds.length} leads.`);
-      setBulkDeleteDialog(false);
-      setRowSelection({});
       fetchLeads();
     } catch {
+      setLeads(previousLeads);
       toast.error('Bulk deletion failed partially.');
     }
   };
 
   const handleBulkAssign = async () => {
+    const previousLeads = [...leads];
+    const targetAgent = allAgents.find(a => a.id === bulkAssignTarget) || agents.find(a => a.id === bulkAssignTarget);
+    const targetName = targetAgent ? targetAgent.name : '';
+    const targetEmail = targetAgent ? targetAgent.email : '';
+    
+    setLeads(leads.map(l => selectedRowIds.includes(l._id) ? {
+      ...l,
+      assigned_to: bulkAssignTarget || null,
+      assignee_name: targetName,
+      assignee_email: targetEmail,
+      _optimistic: true
+    } : l));
+    setBulkAssignModal(false);
+    setRowSelection({});
+    
     try {
       await Promise.all(selectedRowIds.map((id) => axios.patch(`/api/v1/leads/${id}/assign`, { userId: bulkAssignTarget || null })));
       toast.success(`Successfully assigned ${selectedRowIds.length} leads.`);
-      setBulkAssignModal(false);
-      setRowSelection({});
       fetchLeads();
     } catch {
+      setLeads(previousLeads);
       toast.error('Bulk assignment failed.');
     }
   };
 
   const handleBulkStatusChange = async () => {
+    const previousLeads = [...leads];
+    setLeads(leads.map(l => selectedRowIds.includes(l._id) ? {
+      ...l,
+      status: bulkStatusTarget,
+      _optimistic: true
+    } : l));
+    setBulkStatusModal(false);
+    setRowSelection({});
+    
     try {
       await Promise.all(selectedRowIds.map((id) => axios.patch(`/api/v1/leads/${id}/status`, { status: bulkStatusTarget })));
       toast.success(`Successfully updated ${selectedRowIds.length} leads status.`);
-      setBulkStatusModal(false);
-      setRowSelection({});
       fetchLeads();
     } catch (err) {
+      setLeads(previousLeads);
       toast.error(err.response?.data?.error || 'Bulk status update failed.');
     }
   };

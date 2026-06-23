@@ -167,7 +167,7 @@ export const getCsvLogs = async (req, res) => {
 export const getCsvLogById = async (req, res) => {
   const { batchId } = req.params;
   try {
-    // Check Redis cache first
+    // Check cache first
     const cached = await cacheGet(`csv_progress:${batchId}`);
     if (cached) {
       // Strict Vertical Scoping check

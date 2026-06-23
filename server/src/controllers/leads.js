@@ -11,6 +11,8 @@ import {
 } from '../services/cache.js';
 import { CacheKeys, TTL, hashLeadListParams } from '../lib/cacheKeys.js';
 import { broadcastToAll } from '../services/assignmentBroadcaster.js';
+import { z } from 'zod';
+import { bulkInsert } from '../db/bulkInsert.js';
 
 // ── Cursor helpers ─────────────────────────────────────────────────────────────
 // Encode/decode opaque cursors so the client never sees raw timestamps / UUIDs.
@@ -86,8 +88,6 @@ export const getLeads = async (req, res) => {
         const dir      = sortDir === 'asc' ? 'ASC' : 'DESC';
         const sortCol  = ['createdAt', 'updatedAt', 'businessName', 'name', 'status'].includes(sortBy) ? SORT_COLUMN_MAP[sortBy] : 'l.created_at';
         const agentId  = req.user.role === 'agent' ? req.user.sub : null;
-
-        // Upstash free tier budget optimization: paginated lead list page caching removed
 
         // ── Build WHERE clauses dynamically ───────────────────────────────
         const params  = [verticalId];
@@ -413,7 +413,6 @@ export const getLeadById = async (req, res) => {
         return res.status(404).json({ success: false, error: 'Lead not found' });
     }
     try {
-        // Upstash free tier budget optimization: individual lead detail caching removed
         // Single query with all joins — no N+1
         const res2 = await query(`
             SELECT
@@ -804,4 +803,138 @@ export const uploadLeadPhoto = async (req, res) => {
         return res.status(500).json({ success: false, error: error.message });
     }
 };
+
+/**
+ * POST /leads/bulk
+ */
+export const createLeadBulk = async (req, res) => {
+    const { leads, verticalId } = req.body;
+
+    if (!verticalId || !isValidUUID(verticalId)) {
+        return res.status(400).json({ success: false, error: 'Invalid vertical ID format' });
+    }
+
+    if (!Array.isArray(leads) || leads.length === 0) {
+        return res.status(400).json({ success: false, error: 'leads must be a non-empty array' });
+    }
+
+    if (leads.length > 10000) {
+        return res.status(400).json({ success: false, error: 'Maximum 10,000 leads per request' });
+    }
+
+    try {
+        // RBAC check
+        if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
+            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+        }
+
+        const LeadSchema = z.object({
+            name: z.string().min(1, 'Name is required').max(255),
+            phone: z.string().optional().nullable().transform(val => val || ''),
+            businessName: z.string().optional().nullable().transform(val => val || ''),
+            subVerticalId: z.string().uuid().optional().nullable(),
+            assignedTo: z.string().uuid().optional().nullable(),
+            leadType: z.enum(['CALL', 'FIELD']).default('CALL'),
+            status: z.string().default('new'),
+            data: z.record(z.any()).optional().default({}),
+            stageId: z.string().uuid().optional().nullable(),
+        });
+
+        const valid = [];
+        const invalid = [];
+
+        for (let i = 0; i < leads.length; i++) {
+            const result = LeadSchema.safeParse(leads[i]);
+            if (result.success) {
+                valid.push(result.data);
+            } else {
+                invalid.push({ index: i, errors: result.error.flatten().fieldErrors });
+            }
+        }
+
+        if (valid.length === 0) {
+            return res.status(200).json({
+                success: true,
+                data: {
+                    inserted: 0,
+                    skipped: leads.length,
+                    errors: invalid
+                }
+            });
+        }
+
+        // Deduplication against DB: fetch existing phone numbers for this vertical
+        const inputPhones = valid.map(l => l.phone).filter(Boolean);
+        let existingPhones = [];
+        if (inputPhones.length > 0) {
+            const existingRes = await query(
+                'SELECT phone FROM leads WHERE vertical_id = $1 AND is_deleted = false AND phone = ANY($2)',
+                [verticalId, inputPhones]
+            );
+            existingPhones = existingRes.rows.map(r => r.phone);
+        }
+        const phoneSet = new Set(existingPhones);
+
+        const finalInsertLeads = [];
+
+        for (const lead of valid) {
+            if (lead.phone && phoneSet.has(lead.phone)) {
+                invalid.push({ name: lead.name, phone: lead.phone, reason: 'Duplicate phone number' });
+            } else {
+                finalInsertLeads.push(lead);
+                if (lead.phone) {
+                    phoneSet.add(lead.phone); // Prevent duplicate phones within the same batch
+                }
+            }
+        }
+
+        let insertedCount = 0;
+        let insertedRows = [];
+        if (finalInsertLeads.length > 0) {
+            const columns = [
+                'id', 'vertical_id', 'sub_vertical_id', 'assigned_to', 'uploaded_by',
+                'name', 'phone', 'business_name', 'data', 'status', 'lead_type', 'stage_id'
+            ];
+            const rows = finalInsertLeads.map(l => [
+                crypto.randomUUID(),
+                verticalId,
+                l.subVerticalId || null,
+                l.assignedTo || null,
+                req.user.sub,
+                l.name,
+                l.phone || '',
+                l.businessName || '',
+                JSON.stringify(l.data || {}),
+                l.status || 'new',
+                l.leadType || 'CALL',
+                l.stageId || null
+            ]);
+
+            insertedRows = await bulkInsert(
+                { query },
+                'leads',
+                columns,
+                rows,
+                { onConflict: 'ON CONFLICT DO NOTHING' }
+            );
+            insertedCount = insertedRows.length;
+        }
+
+        // Invalidate lead list cache for this vertical
+        await invalidateOnLeadChange(verticalId, null);
+        broadcastToAll({ type: 'LEAD_MUTATED', verticalId, action: 'bulk_create' });
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                inserted: insertedCount,
+                skipped: leads.length - insertedCount,
+                errors: invalid
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+    }
+};
+
 

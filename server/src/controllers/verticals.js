@@ -19,7 +19,7 @@ const generateSlug = (name) => {
 
 /**
  * GET /verticals
- * Cached in Redis for 24h. Non-super_admin users get a filtered subset
+ * Cached for 24h. Non-super_admin users get a filtered subset
  * (RBAC filtering happens in-memory from the cached full list).
  */
 export const getVerticals = async (req, res) => {

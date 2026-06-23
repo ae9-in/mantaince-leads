@@ -70,10 +70,10 @@ async function removeTestData() {
   `);
   console.log(`✅ Deleted ${usersResult.rowCount} non-admin users.`);
 
-  // 6. Invalidate taxonomy and report cache in Redis
-  console.log('🔄 Invalidating Redis caches...');
+  // 6. Invalidate taxonomy and report cache
+  console.log('🔄 Invalidating caches...');
   await invalidateOnTaxonomyChange(null);
-  console.log('✅ Redis caches cleared.');
+  console.log('✅ Caches cleared.');
 
   // 7. Verification printout of remaining verticals
   const remainingVerts = await query(`

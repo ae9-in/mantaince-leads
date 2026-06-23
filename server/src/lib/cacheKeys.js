@@ -1,5 +1,5 @@
 /**
- * Cache Key Templates — single source of truth for every Redis key.
+ * Cache Key Templates — single source of truth for every cache key.
  * Using pure functions means keys are predictable, testable, and easily
  * searched across the codebase.
  */
@@ -49,9 +49,9 @@ export const CacheKeys = {
  * Grouped by expected data volatility.
  */
 export const TTL = {
-    VERTICALS:            300, // 5 min (Upstash Free Tier budget)
+    VERTICALS:            300, // 5 min
     SUB_VERTICALS:        300, // 5 min
-    FIELD_CONFIGS:        300, // 5 min (Upstash Free Tier budget)
+    FIELD_CONFIGS:        300, // 5 min
     LEAD_DETAIL:          900, // 15 min
     LEAD_LIST_PAGE:       120, // 2 min
     REPORTS:               60, // 60s (dashboard status / analytics stats)

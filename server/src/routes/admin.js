@@ -17,6 +17,7 @@ import {
 import authenticate from '../middleware/authenticate.js';
 import attachRole from '../middleware/attachRole.js';
 import checkPermission from '../middleware/checkPermission.js';
+import { timingReport } from '../middleware/timing.js';
 
 const router = express.Router();
 
@@ -43,5 +44,6 @@ router.patch('/sub-verticals/:subVerticalId/stages/reorder', checkPermission('su
 // Visual Admin Audit Logs
 router.get('/audit-logs', checkPermission('reports:read'), getAdminAuditLogs);
 router.get('/dashboard-stats', checkPermission('reports:read'), getAdminDashboardStats);
+router.get('/timing-report', checkPermission('reports:read'), timingReport);
 
 export default router;

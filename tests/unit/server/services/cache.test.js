@@ -1,36 +1,41 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { cacheGet, cacheSet, cacheDelete, cacheDeletePattern, withCache, flushL1Cache } from '../../../../server/src/services/cache.js';
-import { redis } from '../../../../server/src/lib/redis.js';
 
-vi.mock('../../../../server/src/lib/redis.js', () => ({
-  redis: {
-    ping: vi.fn().mockResolvedValue('PONG'),
-    get: vi.fn(),
-    set: vi.fn(),
-    del: vi.fn(),
-    scan: vi.fn(),
-  },
-}));
-
-describe('cache.withCache', () => {
+describe('cache service (direct RDS connection)', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     flushL1Cache();
   });
 
-  it('tries to call redis.get and returns the cached value', async () => {
+  it('bypasses caching for standard query keys (returns null always)', async () => {
     const mockVal = { data: 'cached' };
-    vi.mocked(redis.get).mockResolvedValue(mockVal);
-    const res = await cacheGet('test-key');
+    await cacheSet('verticals:list', mockVal, 300);
+    const res = await cacheGet('verticals:list');
+    expect(res).toBeNull();
+  });
+
+  it('allows caching specifically for csv_progress keys', async () => {
+    const mockVal = { progress: 50 };
+    await cacheSet('csv_progress:batch-123', mockVal, 300);
+    const res = await cacheGet('csv_progress:batch-123');
     expect(res).toEqual(mockVal);
   });
 
-  it('runs fetcher on cache miss', async () => {
-    vi.mocked(redis.get).mockResolvedValue(null);
+  it('always bypasses cache-aside query wrapper and runs fetcher directly without caching', async () => {
     const fetcher = vi.fn().mockResolvedValue({ data: 'fresh' });
-    const result = await withCache('test-key', 300, fetcher);
+    const result = await withCache('verticals:list', 300, fetcher);
 
     expect(result).toEqual({ data: 'fresh' });
     expect(fetcher).toHaveBeenCalledOnce();
+
+    const cachedVal = await cacheGet('verticals:list');
+    expect(cachedVal).toBeNull();
+  });
+
+  it('supports deleting csv_progress keys', async () => {
+    await cacheSet('csv_progress:batch-123', 'val1', 300);
+    await cacheDelete('csv_progress:batch-123');
+    const res = await cacheGet('csv_progress:batch-123');
+    expect(res).toBeNull();
   });
 });
+

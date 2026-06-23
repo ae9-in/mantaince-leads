@@ -11,7 +11,7 @@ import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 
 /**
  * GET /verticals/:verticalId/fields
- * Cached in Redis for 24h per vertical.
+ * Cached for 24h per vertical.
  */
 export const getFieldConfigs = async (req, res) => {
     const { verticalId } = req.params;
@@ -242,7 +242,7 @@ export const reorderFieldConfigs = async (req, res) => {
 
 /**
  * GET /verticals/:verticalId/fields/csv-template
- * Served from the same Redis-cached field config list — no extra query.
+ * Served from the same cached field config list — no extra query.
  */
 export const getCsvTemplateFields = async (req, res) => {
     const { verticalId } = req.params;

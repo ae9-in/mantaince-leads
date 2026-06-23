@@ -2,6 +2,7 @@ import { query } from '../config/db.js';
 import crypto from 'crypto';
 import { broadcast, addClient, removeClient } from '../services/assignmentBroadcaster.js';
 import { logAudit } from '../services/audit.js';
+import { bulkInsert } from '../db/bulkInsert.js';
 
 /**
  * SSE Stream Endpoint
@@ -44,13 +45,21 @@ export const bulkAssign = async (req, res) => {
 
     // 2. Create new assignments
     if (subVerticalIds && subVerticalIds.length > 0) {
-      for (const svId of subVerticalIds) {
-        await query(`
-          INSERT INTO user_assignments (id, user_id, sub_vertical_id, assigned_by, is_active)
-          VALUES ($1, $2, $3, $4, true)
-          ON CONFLICT (user_id, sub_vertical_id) DO UPDATE SET is_active = true, updated_at = NOW()
-        `, [crypto.randomUUID(), userId, svId, req.user.sub]);
-      }
+      const columns = ['id', 'user_id', 'sub_vertical_id', 'assigned_by', 'is_active'];
+      const rows = subVerticalIds.map(svId => [
+        crypto.randomUUID(),
+        userId,
+        svId,
+        req.user.sub,
+        true
+      ]);
+      await bulkInsert(
+        { query },
+        'user_assignments',
+        columns,
+        rows,
+        { onConflict: 'ON CONFLICT (user_id, sub_vertical_id) DO UPDATE SET is_active = true, updated_at = NOW()' }
+      );
     }
 
     // 3. Fetch full fresh list for broadcast

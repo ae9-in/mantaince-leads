@@ -242,6 +242,7 @@ export const AppLayout = () => {
                 onAddSubVertical={() => navigate('/admin/verticals')}
                 onExpandVertical={fetchSubVerticalsForVertical}
                 onSelectVertical={(vert) => navigate(`/leads?verticalId=${vert._id}`)}
+                loading={loadingVerticals}
               />
             </div>
           )}

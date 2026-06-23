@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import exifr from 'exifr';
 
 export const GeotagCapture = ({ leadType, onChange }) => {
   const [gpsData, setGpsData] = useState(null);
@@ -12,7 +11,8 @@ export const GeotagCapture = ({ leadType, onChange }) => {
 
     try {
       // Extract EXIF data
-      const gps = await exifr.gps(file);
+      const exifrModule = await import('exifr');
+      const gps = await exifrModule.default.gps(file);
       if (gps && gps.latitude && gps.longitude) {
         const coords = { lat: gps.latitude, lng: gps.longitude, accuracy: 10 };
         setGpsData(coords);

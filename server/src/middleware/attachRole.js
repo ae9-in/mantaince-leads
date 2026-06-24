@@ -32,6 +32,8 @@ export const attachRole = async (req, res, next) => {
         permissions: cached.userDoc.permissions
       };
       req.user.verticalAccess = cached.combinedAccess;
+      req.user.assignedSubVerticals = cached.assignedSubVerticals || [];
+      req.user.role = cached.userDoc.role_name;
       return next();
     }
 
@@ -44,7 +46,14 @@ export const attachRole = async (req, res, next) => {
                  JOIN sub_verticals sv ON ua.sub_vertical_id = sv.id
                  WHERE ua.user_id = u.id AND ua.is_active = true
                ), '{}'::text[]
-             ) AS assigned_verticals
+             ) AS assigned_verticals,
+             COALESCE(
+               ARRAY(
+                 SELECT DISTINCT ua.sub_vertical_id::text
+                 FROM user_assignments ua
+                 WHERE ua.user_id = u.id AND ua.is_active = true
+               ), '{}'::text[]
+             ) AS assigned_sub_verticals
       FROM users u 
       JOIN roles r ON u.role_id = r.id 
       WHERE u.id = $1
@@ -63,10 +72,12 @@ export const attachRole = async (req, res, next) => {
       ...(Array.isArray(userDoc.vertical_access) ? userDoc.vertical_access.map(v => String(v)) : []),
       ...(Array.isArray(userDoc.assigned_verticals) ? userDoc.assigned_verticals.map(v => String(v)) : [])
     ])];
+    const assignedSubVerticals = Array.isArray(userDoc.assigned_sub_verticals) ? userDoc.assigned_sub_verticals.map(v => String(v)) : [];
 
     const profileData = {
       userDoc,
-      combinedAccess
+      combinedAccess,
+      assignedSubVerticals
     };
 
     // Cache for 10 minutes (600 seconds)
@@ -86,6 +97,8 @@ export const attachRole = async (req, res, next) => {
     
     // Also attach vertical access if not already in token payload
     req.user.verticalAccess = combinedAccess;
+    req.user.assignedSubVerticals = assignedSubVerticals;
+    req.user.role = userDoc.role_name;
     
     next();
   } catch (error) {

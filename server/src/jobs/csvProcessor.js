@@ -26,17 +26,6 @@ const sanitizePhone = (phone) => {
 
 /**
  * Build a multi-row VALUES SQL and params for bulk INSERT.
- *
- * Example for rows = [{...}, {...}]:
- *   INSERT INTO leads (...) VALUES ($1,$2,...,$10), ($11,$12,...,$20), ...
- *
- * @param {Array}  rows     - Validated lead objects ready to insert
- * @param {string} verticalId
- * @param {string|null} subVerticalId
- * @param {string|null} assignedTo
- * @param {string} uploadedBy
- * @param {string} batchId  - csv_batch_id FK
- * @returns {{ sql: string, params: Array }}
  */
 function buildBulkInsertSql(rows, verticalId, subVerticalId, defaultAssignedTo, uploadedBy, batchId) {
     const COLS_PER_ROW = 12;
@@ -73,7 +62,7 @@ function buildBulkInsertSql(rows, verticalId, subVerticalId, defaultAssignedTo, 
     }
 
     const sql = `
-        INSERT INTO leads (${colNames.join(', ')})
+        INSERT INTO cost_conversions (${colNames.join(', ')})
         VALUES ${valuePlaceholders.join(', ')}
         ON CONFLICT DO NOTHING
     `;
@@ -81,22 +70,16 @@ function buildBulkInsertSql(rows, verticalId, subVerticalId, defaultAssignedTo, 
 }
 
 /**
- * Bull processor function — called by the CSV queue worker.
- *
- * Performance improvements vs. previous version:
- *  • Bulk INSERT in chunks of 500 (was: one INSERT per row → N round-trips)
- *  • Single transaction per chunk for atomicity
- *  • phone dedup via a Set pre-loaded once (unchanged — already efficient)
- *  • Cache invalidated once after all rows are processed (not per-row)
+ * Queue processor function.
  */
 export const processCsvJob = async (job) => {
-    const { batchId, fileBufferBase64, verticalId, uploadedBy, assignedTo, subVerticalId } = job.data;
+    const { batchId, fileBufferBase64, verticalId, uploadedBy, assignedTo, subVerticalId, leadType = 'CALL' } = job.data;
 
     let totalRows = 0;
     let successCount = 0;
     let duplicateCount = 0;
     const errors = [];
-    const validLeads = []; // Accumulate validated rows for bulk INSERT
+    const validLeads = [];
 
     // Mark job as in-progress
     await query(
@@ -104,7 +87,7 @@ export const processCsvJob = async (job) => {
         ['processing', batchId]
     );
 
-    // Initial cache state in Redis
+    // Initial cache state
     await cacheSet(`csv_progress:${batchId}`, {
         id: batchId,
         uploaded_by: uploadedBy,
@@ -118,7 +101,6 @@ export const processCsvJob = async (job) => {
     }, 3600);
 
     try {
-        // 1. Parse CSV from the base64 buffer
         const buffer = Buffer.from(fileBufferBase64, 'base64');
         const rows   = parse(buffer, { columns: true, trim: true, skip_empty_lines: true });
 
@@ -144,7 +126,6 @@ export const processCsvJob = async (job) => {
             return;
         }
 
-        // Update cache with correct total rows count
         await cacheSet(`csv_progress:${batchId}`, {
             id: batchId,
             uploaded_by: uploadedBy,
@@ -157,21 +138,18 @@ export const processCsvJob = async (job) => {
             errors: []
         }, 3600);
 
-        // 2. Load field configs for this vertical (one query)
         const configsRes = await query(
             'SELECT field_key, csv_header, label FROM field_configs WHERE vertical_id = $1',
             [verticalId]
         );
         const configs = configsRes.rows;
 
-        // 2.5 Load agents for this vertical to map "employee spoken" to assigned_to
         const agentsRes = await query(
             'SELECT id, name FROM users WHERE $1 = ANY(vertical_access)',
             [verticalId]
         );
         const agentMap = new Map(agentsRes.rows.map(a => [a.name.toLowerCase().trim(), a.id]));
 
-        // 3. Extract unique phone numbers from the parsed CSV to query surgically
         const csvPhones = [];
         for (const rawRow of rows) {
             const row = {};
@@ -181,30 +159,27 @@ export const processCsvJob = async (job) => {
                     row[key] = rawRow[k];
                 }
             }
-            const rawPhone = sanitizePhone(row['number'] || row['phone'] || row['mobile'] || '');
+            const rawPhone = sanitizePhone(row['number'] || row['phone'] || row['mobile'] || row['contact no'] || row['contact'] || '');
             if (rawPhone) {
                 csvPhones.push(rawPhone);
             }
         }
         const uniqueCsvPhones = [...new Set(csvPhones)];
 
-        // 4. Load only existing phone numbers that match the ones in CSV
         let existingPhones = [];
         if (uniqueCsvPhones.length > 0) {
             const existingRes = await query(
-                `SELECT phone FROM leads WHERE vertical_id = $1 AND is_deleted = false AND phone = ANY($2)`,
+                `SELECT phone FROM cost_conversions WHERE vertical_id = $1 AND is_deleted = false AND phone = ANY($2)`,
                 [verticalId, uniqueCsvPhones]
             );
             existingPhones = existingRes.rows.map(l => sanitizePhone(l.phone));
         }
         const phoneSet = new Set(existingPhones);
 
-        // 5. Validate all rows — build a list of valid lead objects and errors
         let rowNum = 0;
         for (const rawRow of rows) {
             rowNum++;
 
-            // Normalize keys to lowercase
             const row = {};
             for (const k of Object.keys(rawRow)) {
                 const key = k.toLowerCase().trim();
@@ -213,9 +188,9 @@ export const processCsvJob = async (job) => {
                 }
             }
 
-            const rawPhone    = sanitizePhone(row['number'] || row['phone'] || row['mobile'] || '');
-            const rawName     = row['name'] || '';
-            const rawBusiness = row['business'] || row['business name'] || '';
+            const rawPhone    = sanitizePhone(row['contact no'] || row['contact'] || row['number'] || row['phone'] || row['mobile'] || '');
+            const rawName     = row['business/person/shop/company name'] || row['name'] || '';
+            const rawBusiness = row['business/person/shop/company name'] || row['business'] || row['business name'] || '';
 
             if (!rawPhone) {
                 errors.push({ row: rowNum, reason: 'Missing phone number' });
@@ -254,26 +229,37 @@ export const processCsvJob = async (job) => {
                 continue;
             }
 
-            // Map CSV columns → dynamic field config keys
             const dataMap = {};
-            
-            // Map base dynamic fields first (defaulting to empty string if missing)
-            dataMap['nameBusiness'] = row['name business'] || row['namebusiness'] || '';
+            // New template field mappings
             dataMap['date'] = row['date'] || '';
-            const empSpokenRaw = row['employee spoken'] || row['employee'] || row['spoken'] || '';
+            dataMap['businessType'] = row['business type'] || row['businesstype'] || '';
+            dataMap['area'] = row['area'] || '';
+            dataMap['city'] = row['city'] || '';
+            dataMap['pointOfContact'] = row['point of contact (name & number not mandatory for products)'] || row['point of contact'] || row['pointofcontact'] || '';
+            dataMap['remarks'] = row['remarks'] || '';
+            dataMap['recording'] = row['recording'] || '';
+            dataMap['requirement'] = row['requirement(if any)'] || row['requirement (if any)'] || row['requirement'] || '';
+            dataMap['requireFollowUp'] = row['require follow up (yes/no)'] || row['require follow up'] || row['requirefollowup'] || '';
+            dataMap['followUpDate'] = row['follow up date'] || row['followupdate'] || '';
+            dataMap['followUpRemarks'] = row['follow up remarks'] || row['followupremarks'] || '';
+            dataMap['notesToCosTeam'] = row['notes to cos team (if any)'] || row['notes to cos team'] || row['notestocteam'] || '';
+            // Legacy / backward compat fields
+            dataMap['nameBusiness'] = row['name business'] || row['namebusiness'] || '';
+            dataMap['deliveredLocation'] = row['delivered location (google maps location)'] || row['delivered location'] || row['delivered'] || row['location'] || '';
+            dataMap['deliveredLink'] = row['delivered link'] || row['link'] || '';
+            const empSpokenRaw = row['employee name'] || row['employee spoken'] || row['employee'] || row['spoken'] || '';
             dataMap['employeeSpoken'] = empSpokenRaw;
             dataMap['convertedStatus'] = row['converted status'] || row['converted'] || '';
-            dataMap['deliveredLocation'] = row['delivered location (google maps location)'] || row['delivered location'] || row['delivered'] || row['location'] || row['area'] || '';
-            dataMap['deliveredLink'] = row['delivered link'] || row['link'] || '';
 
             const empSpokenName = empSpokenRaw.toLowerCase().trim();
             const rowAssignedTo = agentMap.get(empSpokenName) || null;
 
-            // Parse lead type and status
-            const rawLeadType = row['lead type'] || row['type'] || 'CALL';
-            let leadTypeVal = 'CALL';
-            if (rawLeadType.toLowerCase().includes('field')) {
-                leadTypeVal = 'FIELD';
+            const rawLeadType = row['lead type'] || row['type'] || leadType;
+            let leadTypeVal = leadType;
+            if (leadType === 'CALL') {
+                if (rawLeadType.toLowerCase().includes('field')) {
+                    leadTypeVal = 'FIELD';
+                }
             }
 
             const rawStatus = (row['status'] || 'new').toLowerCase().trim();
@@ -303,10 +289,8 @@ export const processCsvJob = async (job) => {
                 status: statusVal
             });
 
-            // Add to dedup set immediately so later rows in the same file are caught
             phoneSet.add(rawPhone);
 
-            // Periodically update progress in Redis during validation
             if (rowNum % 100 === 0 || rowNum === totalRows) {
                 await cacheSet(`csv_progress:${batchId}`, {
                     id: batchId,
@@ -322,7 +306,7 @@ export const processCsvJob = async (job) => {
             }
         }
 
-        // 5. Bulk INSERT in chunks of BATCH_SIZE
+        // Bulk INSERT
         for (let i = 0; i < validLeads.length; i += BATCH_SIZE) {
             const chunk = validLeads.slice(i, i + BATCH_SIZE);
             try {
@@ -332,17 +316,14 @@ export const processCsvJob = async (job) => {
                 const result = await query(sql, params);
                 successCount += result.rowCount;
             } catch (chunkErr) {
-                // If a chunk fails, record individual errors for each row in it
                 const chunkStart = i + 1;
                 const chunkEnd   = Math.min(i + BATCH_SIZE, validLeads.length);
                 errors.push({ row: `${chunkStart}-${chunkEnd}`, reason: chunkErr.message });
             }
 
-            // Report progress back to Bull
             const progress = Math.round(((i + chunk.length) / validLeads.length) * 100);
             await job.progress(progress);
 
-            // Update progress in Redis during insertion
             await cacheSet(`csv_progress:${batchId}`, {
                 id: batchId,
                 uploaded_by: uploadedBy,
@@ -356,7 +337,6 @@ export const processCsvJob = async (job) => {
             }, 3600);
         }
 
-        // 6. Finalize log entry
         await query(`
             UPDATE csv_upload_logs
             SET status = 'done', success_count = $1, failed_count = $2,
@@ -364,7 +344,6 @@ export const processCsvJob = async (job) => {
             WHERE id = $5
         `, [successCount, errors.length, duplicateCount, JSON.stringify(errors), batchId]);
 
-        // Update final status to 'done' in Redis
         await cacheSet(`csv_progress:${batchId}`, {
             id: batchId,
             uploaded_by: uploadedBy,
@@ -377,11 +356,10 @@ export const processCsvJob = async (job) => {
             errors: errors
         }, 3600);
 
-        // 7. Invalidate lead list cache for this vertical (once, not per-row)
         invalidateOnLeadChange(verticalId, null).catch(() => {});
 
         try {
-            broadcastToAll({ type: 'LEAD_MUTATED', verticalId, action: 'csv_upload', batchId });
+            broadcastToAll({ type: 'COST_CONVERSION_MUTATED', verticalId, action: 'csv_upload', batchId });
         } catch (broadcastErr) {
             console.error('[CSV Processor] SSE broadcast failed:', broadcastErr.message);
         }

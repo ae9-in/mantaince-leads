@@ -5,25 +5,25 @@ import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 import { cacheGet, cacheSet, cacheDelete, cacheDeletePattern } from '../services/cache.js';
 
 /**
- * GET /leads/:leadId/follow-ups
+ * GET /cost-conversions/:costConversionId/follow-ups
  */
 export const getFollowUps = async (req, res) => {
-  const { leadId } = req.params;
+  const { costConversionId } = req.params;
   const { status, assignedTo, from, to, search, sortBy = 'follow_up_date', sortDir = 'desc' } = req.query;
   try {
-    // Check if lead exists and get vertical scoping
-    const leadRes = await query('SELECT vertical_id, assigned_to FROM leads WHERE id = $1 AND is_deleted = false', [leadId]);
-    const lead = leadRes.rows[0];
-    if (!lead) {
-      return res.status(404).json({ success: false, error: 'Lead not found' });
+    // Check if cost conversion exists and get vertical scoping
+    const costConversionRes = await query('SELECT vertical_id, assigned_to FROM cost_conversions WHERE id = $1 AND is_deleted = false', [costConversionId]);
+    const costConversion = costConversionRes.rows[0];
+    if (!costConversion) {
+      return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
     }
 
     // Scoping check
-    if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(lead.vertical_id))) {
+    if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(costConversion.vertical_id))) {
       return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
     }
-    if (req.user.role === 'agent' && lead.assigned_to !== req.user.sub) {
-      return res.status(403).json({ success: false, error: 'Access forbidden: this lead is not assigned to you' });
+    if (req.user.role === 'agent' && costConversion.assigned_to !== req.user.sub) {
+      return res.status(403).json({ success: false, error: 'Access forbidden: this cost/conversion is not assigned to you' });
     }
 
     let sql = `
@@ -33,9 +33,9 @@ export const getFollowUps = async (req, res) => {
       FROM follow_ups f
       JOIN users u_assign ON f.assigned_to_id = u_assign.id
       JOIN users u_creator ON f.created_by_id = u_creator.id
-      WHERE f.lead_id = $1
+      WHERE f.cost_conversion_id = $1
     `;
-    const params = [leadId];
+    const params = [costConversionId];
     let pIdx = 2;
 
     if (status) {
@@ -75,10 +75,10 @@ export const getFollowUps = async (req, res) => {
 };
 
 /**
- * POST /leads/:leadId/follow-ups
+ * POST /cost-conversions/:costConversionId/follow-ups
  */
 export const createFollowUp = async (req, res) => {
-  const { leadId } = req.params;
+  const { costConversionId } = req.params;
   const { assignedToId, followUpDate, description, status = 'PENDING' } = req.body;
 
   if (!assignedToId || !followUpDate || !description) {
@@ -86,32 +86,32 @@ export const createFollowUp = async (req, res) => {
   }
 
   try {
-    // Check if lead exists and get sub_vertical_id
-    const leadRes = await query('SELECT sub_vertical_id, vertical_id, assigned_to, business_name FROM leads WHERE id = $1 AND is_deleted = false', [leadId]);
-    const lead = leadRes.rows[0];
-    if (!lead) {
-      return res.status(404).json({ success: false, error: 'Lead not found' });
+    // Check if cost conversion exists and get sub_vertical_id
+    const costConversionRes = await query('SELECT sub_vertical_id, vertical_id, assigned_to, business_name FROM cost_conversions WHERE id = $1 AND is_deleted = false', [costConversionId]);
+    const costConversion = costConversionRes.rows[0];
+    if (!costConversion) {
+      return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
     }
 
     // Scoping check
-    if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(lead.vertical_id))) {
+    if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(costConversion.vertical_id))) {
       return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
     }
-    if (req.user.role === 'agent' && lead.assigned_to !== req.user.sub) {
-      return res.status(403).json({ success: false, error: 'Access forbidden: this lead is not assigned to you' });
+    if (req.user.role === 'agent' && costConversion.assigned_to !== req.user.sub) {
+      return res.status(403).json({ success: false, error: 'Access forbidden: this cost/conversion is not assigned to you' });
     }
 
-    const subVerticalId = lead.sub_vertical_id;
+    const subVerticalId = costConversion.sub_vertical_id;
     if (!subVerticalId) {
-      return res.status(400).json({ success: false, error: 'Lead must be assigned to a sub-vertical before creating follow-ups' });
+      return res.status(400).json({ success: false, error: 'Cost/Conversion must be assigned to a sub-vertical before creating follow-ups' });
     }
 
     const id = crypto.randomUUID();
     const insertRes = await query(`
-      INSERT INTO follow_ups (id, lead_id, sub_vertical_id, assigned_to_id, created_by_id, follow_up_date, description, status)
+      INSERT INTO follow_ups (id, cost_conversion_id, sub_vertical_id, assigned_to_id, created_by_id, follow_up_date, description, status)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *
-    `, [id, leadId, subVerticalId, assignedToId, req.user.sub, followUpDate, description, status]);
+    `, [id, costConversionId, subVerticalId, assignedToId, req.user.sub, followUpDate, description, status]);
 
     const newFollowUp = insertRes.rows[0];
 
@@ -119,15 +119,15 @@ export const createFollowUp = async (req, res) => {
       action: 'FOLLOWUP_CREATED',
       targetCollection: 'follow_ups',
       targetId: newFollowUp.id,
-      entityLabel: lead.business_name,
+      entityLabel: costConversion.business_name,
       after: newFollowUp
     });
 
     // Invalidate calendar cache
     await cacheDeletePattern('calendar:*');
 
-    // Notify clients of lead mutation to trigger refresh
-    broadcastToAll({ type: 'LEAD_MUTATED', verticalId: lead.vertical_id, action: 'followup_create', leadId });
+    // Notify clients of cost conversion mutation to trigger refresh
+    broadcastToAll({ type: 'COST_CONVERSION_MUTATED', verticalId: costConversion.vertical_id, action: 'followup_create', costConversionId });
 
     return res.status(201).json({ success: true, data: newFollowUp });
   } catch (error) {
@@ -149,17 +149,17 @@ export const updateFollowUp = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Follow-up not found' });
     }
 
-    // Get lead vertical_id and assigned operator
-    const leadRes = await query('SELECT vertical_id, assigned_to, business_name FROM leads WHERE id = $1', [followUp.lead_id]);
-    const lead = leadRes.rows[0];
+    // Get cost conversion vertical_id and assigned operator
+    const costConversionRes = await query('SELECT vertical_id, assigned_to, business_name FROM cost_conversions WHERE id = $1', [followUp.cost_conversion_id]);
+    const costConversion = costConversionRes.rows[0];
 
     // Scoping check
-    if (lead) {
-      if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(lead.vertical_id))) {
+    if (costConversion) {
+      if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(costConversion.vertical_id))) {
         return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
       }
-      if (req.user.role === 'agent' && lead.assigned_to !== req.user.sub) {
-        return res.status(403).json({ success: false, error: 'Access forbidden: this lead is not assigned to you' });
+      if (req.user.role === 'agent' && costConversion.assigned_to !== req.user.sub) {
+        return res.status(403).json({ success: false, error: 'Access forbidden: this cost/conversion is not assigned to you' });
       }
     }
 
@@ -212,11 +212,11 @@ export const updateFollowUp = async (req, res) => {
       try {
         const nextId = crypto.randomUUID();
         await query(`
-          INSERT INTO follow_ups (id, lead_id, sub_vertical_id, assigned_to_id, created_by_id, follow_up_date, description, status)
+          INSERT INTO follow_ups (id, cost_conversion_id, sub_vertical_id, assigned_to_id, created_by_id, follow_up_date, description, status)
           VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
         `, [
           nextId, 
-          followUp.lead_id, 
+          followUp.cost_conversion_id, 
           followUp.sub_vertical_id, 
           followUp.assigned_to_id, 
           req.user.sub, 
@@ -232,7 +232,7 @@ export const updateFollowUp = async (req, res) => {
       action: status === 'COMPLETED' ? 'FOLLOWUP_COMPLETED' : 'FOLLOWUP_UPDATED',
       targetCollection: 'follow_ups',
       targetId: id,
-      entityLabel: lead?.business_name,
+      entityLabel: costConversion?.business_name,
       before,
       after: updated
     });
@@ -240,9 +240,9 @@ export const updateFollowUp = async (req, res) => {
     // Invalidate calendar cache
     await cacheDeletePattern('calendar:*');
 
-    // Notify clients of lead mutation to trigger refresh
-    if (lead) {
-      broadcastToAll({ type: 'LEAD_MUTATED', verticalId: lead.vertical_id, action: 'followup_update', leadId: followUp.lead_id });
+    // Notify clients of cost conversion mutation to trigger refresh
+    if (costConversion) {
+      broadcastToAll({ type: 'COST_CONVERSION_MUTATED', verticalId: costConversion.vertical_id, action: 'followup_update', costConversionId: followUp.cost_conversion_id });
     }
 
     return res.status(200).json({ success: true, data: updated });
@@ -263,16 +263,16 @@ export const deleteFollowUp = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Follow-up not found' });
     }
 
-    const leadRes = await query('SELECT vertical_id, assigned_to, business_name FROM leads WHERE id = $1', [followUp.lead_id]);
-    const lead = leadRes.rows[0];
+    const costConversionRes = await query('SELECT vertical_id, assigned_to, business_name FROM cost_conversions WHERE id = $1', [followUp.cost_conversion_id]);
+    const costConversion = costConversionRes.rows[0];
 
     // Scoping check
-    if (lead) {
-      if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(lead.vertical_id))) {
+    if (costConversion) {
+      if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(costConversion.vertical_id))) {
         return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
       }
-      if (req.user.role === 'agent' && lead.assigned_to !== req.user.sub) {
-        return res.status(403).json({ success: false, error: 'Access forbidden: this lead is not assigned to you' });
+      if (req.user.role === 'agent' && costConversion.assigned_to !== req.user.sub) {
+        return res.status(403).json({ success: false, error: 'Access forbidden: this cost/conversion is not assigned to you' });
       }
     }
 
@@ -282,16 +282,16 @@ export const deleteFollowUp = async (req, res) => {
       action: 'FOLLOWUP_DELETED',
       targetCollection: 'follow_ups',
       targetId: id,
-      entityLabel: lead?.business_name,
+      entityLabel: costConversion?.business_name,
       before: followUp
     });
 
     // Invalidate calendar cache
     await cacheDeletePattern('calendar:*');
 
-    // Notify clients of lead mutation to trigger refresh
-    if (lead) {
-      broadcastToAll({ type: 'LEAD_MUTATED', verticalId: lead.vertical_id, action: 'followup_delete', leadId: followUp.lead_id });
+    // Notify clients of cost/conversion mutation to trigger refresh
+    if (costConversion) {
+      broadcastToAll({ type: 'COST_CONVERSION_MUTATED', verticalId: costConversion.vertical_id, action: 'followup_delete', costConversionId: followUp.cost_conversion_id });
     }
 
     return res.status(200).json({ success: true });
@@ -301,36 +301,36 @@ export const deleteFollowUp = async (req, res) => {
 };
 
 /**
- * GET /leads/:leadId/follow-ups/summary
+ * GET /cost-conversions/:costConversionId/follow-ups/summary
  */
 export const getFollowUpSummary = async (req, res) => {
-  const { leadId } = req.params;
+  const { costConversionId } = req.params;
   try {
-    const leadRes = await query('SELECT vertical_id, assigned_to FROM leads WHERE id = $1 AND is_deleted = false', [leadId]);
-    const lead = leadRes.rows[0];
-    if (!lead) {
-      return res.status(404).json({ success: false, error: 'Lead not found' });
+    const costConversionRes = await query('SELECT vertical_id, assigned_to FROM cost_conversions WHERE id = $1 AND is_deleted = false', [costConversionId]);
+    const costConversion = costConversionRes.rows[0];
+    if (!costConversion) {
+      return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
     }
 
     // Scoping check
-    if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(lead.vertical_id))) {
+    if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(costConversion.vertical_id))) {
       return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
     }
-    if (req.user.role === 'agent' && lead.assigned_to !== req.user.sub) {
-      return res.status(403).json({ success: false, error: 'Access forbidden: this lead is not assigned to you' });
+    if (req.user.role === 'agent' && costConversion.assigned_to !== req.user.sub) {
+      return res.status(403).json({ success: false, error: 'Access forbidden: this cost/conversion is not assigned to you' });
     }
 
     const [pendingRes, totalRes, nextRes] = await Promise.all([
-      query(`SELECT COUNT(*)::int as count FROM follow_ups WHERE lead_id = $1 AND status = 'PENDING'`, [leadId]),
-      query(`SELECT COUNT(*)::int as count FROM follow_ups WHERE lead_id = $1`, [leadId]),
+      query(`SELECT COUNT(*)::int as count FROM follow_ups WHERE cost_conversion_id = $1 AND status = 'PENDING'`, [costConversionId]),
+      query(`SELECT COUNT(*)::int as count FROM follow_ups WHERE cost_conversion_id = $1`, [costConversionId]),
       query(`
         SELECT f.*, u.name as assigned_to_name 
         FROM follow_ups f 
         JOIN users u ON f.assigned_to_id = u.id 
-        WHERE f.lead_id = $1 AND f.status = 'PENDING' 
+        WHERE f.cost_conversion_id = $1 AND f.status = 'PENDING' 
         ORDER BY f.follow_up_date ASC 
         LIMIT 1
-      `, [leadId])
+      `, [costConversionId])
     ]);
 
     return res.status(200).json({
@@ -389,7 +389,7 @@ export const getCalendarGrid = async (req, res) => {
         DATE(f.follow_up_date AT TIME ZONE 'Asia/Kolkata')::text AS date
       FROM follow_ups f
       JOIN sub_verticals sv ON f.sub_vertical_id = sv.id
-      LEFT JOIN leads l ON f.lead_id = l.id
+      LEFT JOIN cost_conversions l ON f.cost_conversion_id = l.id
       WHERE sv.vertical_id = $1
         AND DATE_TRUNC('month', f.follow_up_date) = DATE_TRUNC('month', $2::date)
     `;
@@ -473,7 +473,7 @@ export const getCalendarFollowUpsByDate = async (req, res) => {
              u_creator.name as creator_name, u_creator.email as creator_email,
              sv.name as sub_vertical_name
       FROM follow_ups f
-      JOIN leads l ON f.lead_id = l.id
+      JOIN cost_conversions l ON f.cost_conversion_id = l.id
       JOIN users u_assign ON f.assigned_to_id = u_assign.id
       JOIN users u_creator ON f.created_by_id = u_creator.id
       JOIN sub_verticals sv ON f.sub_vertical_id = sv.id
@@ -514,56 +514,48 @@ export const getFollowUpVerticalStats = async (req, res) => {
   }
 
   try {
-    let baseSql = `
+    const targetDate = date || new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+    
+    let sql = `
+      SELECT 
+        COUNT(*)::int AS all_total,
+        COUNT(*) FILTER (WHERE f.status = 'PENDING')::int AS all_pending,
+        COUNT(*) FILTER (WHERE f.status = 'COMPLETED')::int AS all_completed,
+        COUNT(*) FILTER (WHERE f.status = 'MISSED')::int AS all_missed,
+        
+        COUNT(*) FILTER (WHERE DATE(f.follow_up_date AT TIME ZONE 'Asia/Kolkata') = $2::date)::int AS daily_total,
+        COUNT(*) FILTER (WHERE f.status = 'PENDING' AND DATE(f.follow_up_date AT TIME ZONE 'Asia/Kolkata') = $2::date)::int AS daily_pending,
+        COUNT(*) FILTER (WHERE f.status = 'COMPLETED' AND DATE(f.follow_up_date AT TIME ZONE 'Asia/Kolkata') = $2::date)::int AS daily_completed,
+        COUNT(*) FILTER (WHERE f.status = 'MISSED' AND DATE(f.follow_up_date AT TIME ZONE 'Asia/Kolkata') = $2::date)::int AS daily_missed
       FROM follow_ups f
       JOIN sub_verticals sv ON f.sub_vertical_id = sv.id
       WHERE sv.vertical_id = $1
     `;
-    const params = [verticalId];
-    let pIdx = 2;
+    const params = [verticalId, targetDate];
 
     if (subVerticalId) {
-      baseSql += ` AND f.sub_vertical_id = $${pIdx++}`;
+      sql += ` AND f.sub_vertical_id = $3`;
       params.push(subVerticalId);
     }
 
-    // Daily stats (for selected date)
-    let dailySql = `
-      SELECT 
-        COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE f.status = 'PENDING') AS pending,
-        COUNT(*) FILTER (WHERE f.status = 'COMPLETED') AS completed,
-        COUNT(*) FILTER (WHERE f.status = 'MISSED') AS missed
-      ${baseSql}
-    `;
-    const dailyParams = [...params];
-    if (date) {
-      dailySql += ` AND DATE(f.follow_up_date AT TIME ZONE 'Asia/Kolkata') = $${pIdx}::date`;
-      dailyParams.push(date);
-    } else {
-      dailySql += ` AND DATE(f.follow_up_date AT TIME ZONE 'Asia/Kolkata') = CURRENT_DATE`;
-    }
-
-    // All-time stats
-    const allTimeSql = `
-      SELECT 
-        COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE f.status = 'PENDING') AS pending,
-        COUNT(*) FILTER (WHERE f.status = 'COMPLETED') AS completed,
-        COUNT(*) FILTER (WHERE f.status = 'MISSED') AS missed
-      ${baseSql}
-    `;
-
-    const [dailyRes, allTimeRes] = await Promise.all([
-      query(dailySql, dailyParams),
-      query(allTimeSql, params)
-    ]);
+    const result = await query(sql, params);
+    const row = result.rows[0] || {};
 
     return res.status(200).json({
       success: true,
       data: {
-        daily: dailyRes.rows[0] || { total: 0, pending: 0, completed: 0, missed: 0 },
-        allTime: allTimeRes.rows[0] || { total: 0, pending: 0, completed: 0, missed: 0 }
+        daily: {
+          total: row.daily_total || 0,
+          pending: row.daily_pending || 0,
+          completed: row.daily_completed || 0,
+          missed: row.daily_missed || 0
+        },
+        allTime: {
+          total: row.all_total || 0,
+          pending: row.all_pending || 0,
+          completed: row.all_completed || 0,
+          missed: row.all_missed || 0
+        }
       }
     });
   } catch (error) {

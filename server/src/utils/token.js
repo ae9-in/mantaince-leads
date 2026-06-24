@@ -20,7 +20,7 @@ export const signAccessToken = (user, roleName, permissions) => {
  * Sign a refresh token (expires in 7 days)
  */
 export const signRefreshToken = (userId) => {
-  return jwt.sign({ sub: String(userId) }, JWT_REFRESH_SECRET, { expiresIn: '7d' });
+  return jwt.sign({ sub: String(userId), jti: crypto.randomUUID() }, JWT_REFRESH_SECRET, { expiresIn: '7d' });
 };
 
 /**

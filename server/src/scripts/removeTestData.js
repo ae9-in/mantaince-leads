@@ -2,6 +2,7 @@ import { connectDB, query } from '../config/db.js';
 import { invalidateOnTaxonomyChange } from '../services/cache.js';
 
 const verticalsToKeep = [
+  'Real Estate',
   'MilletPro',
   'Pooja - Jaya Janrdhana',
   'Soaps - Aroma Dew',
@@ -77,9 +78,9 @@ async function removeTestData() {
 
   // 7. Verification printout of remaining verticals
   const remainingVerts = await query(`
-    SELECT v.name, COUNT(l.id) as leads_count
+    SELECT v.name, COUNT(cc.id) as leads_count
     FROM verticals v
-    LEFT JOIN leads l ON l.vertical_id = v.id AND l.is_deleted = false
+    LEFT JOIN cost_conversions cc ON cc.vertical_id = v.id AND cc.is_deleted = false
     GROUP BY v.id, v.name
     ORDER BY v.name ASC
   `);

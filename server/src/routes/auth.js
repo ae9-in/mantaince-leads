@@ -1,10 +1,11 @@
 import express from 'express';
-import { login, refresh, logout, me, forgotPassword, resetPassword, changePassword } from '../controllers/auth.js';
+import { login, refresh, logout, me, forgotPassword, resetPassword, changePassword, register } from '../controllers/auth.js';
 import authenticate from '../middleware/authenticate.js';
 
 const router = express.Router();
 
 router.post('/login', login);
+router.post('/register', register);
 router.post('/refresh', refresh);
 router.post('/logout', logout);
 router.get('/me', authenticate, me);

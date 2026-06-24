@@ -1,12 +1,13 @@
-import { query } from '../config/db.js';
+import { connectDB, query } from '../config/db.js';
 
 async function run() {
     try {
+        await connectDB();
         console.log('Connecting to database...');
         const vertRes = await query(`
             SELECT v.id, v.name, COUNT(l.id) as count
             FROM verticals v
-            JOIN leads l ON l.vertical_id = v.id
+            JOIN cost_conversions l ON l.vertical_id = v.id
             GROUP BY v.id, v.name
             ORDER BY count DESC
             LIMIT 1
@@ -23,7 +24,7 @@ async function run() {
         const plan1 = await query(`
             EXPLAIN (ANALYZE, BUFFERS)
             SELECT status AS _id, COUNT(*) AS count
-            FROM leads
+            FROM cost_conversions
             WHERE vertical_id = $1 AND is_deleted = false
             GROUP BY status
         `, [verticalId]);
@@ -34,7 +35,7 @@ async function run() {
         const plan2 = await query(`
             EXPLAIN (ANALYZE, BUFFERS)
             SELECT data->>'area' AS _id, COUNT(*) AS count
-            FROM leads
+            FROM cost_conversions
             WHERE vertical_id = $1 AND is_deleted = false AND data ? 'area'
             GROUP BY data->>'area'
             ORDER BY count DESC
@@ -51,7 +52,7 @@ async function run() {
                 EXTRACT(WEEK FROM created_at)  AS week,
                 COUNT(*)                       AS total,
                 COUNT(*) FILTER (WHERE status = 'converted') AS converted
-            FROM leads
+            FROM cost_conversions
             WHERE vertical_id = $1 AND is_deleted = false
               AND created_at >= NOW() - INTERVAL '90 days'
             GROUP BY year, week
@@ -75,7 +76,7 @@ async function run() {
                     ELSE 0
                 END)::float                                               AS "conversionRate"
             FROM users u
-            JOIN leads l ON l.assigned_to = u.id
+            JOIN cost_conversions l ON l.assigned_to = u.id
             WHERE l.vertical_id = $1 AND l.is_deleted = false
             GROUP BY u.id, u.name, u.email
             ORDER BY "conversionRate" DESC

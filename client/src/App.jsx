@@ -21,6 +21,7 @@ const AdminFieldsPage = lazy(() => import('./pages/AdminFieldsPage.jsx'));
 const AdminSubVerticalFieldsPage = lazy(() => import('./pages/AdminSubVerticalFieldsPage.jsx'));
 const CalendarPage = lazy(() => import('./pages/CalendarPage.jsx'));
 const FollowUpsPage = lazy(() => import('./pages/FollowUpsPage.jsx'));
+const FollowUpsPositivesPage = lazy(() => import('./pages/FollowUpsPositivesPage.jsx'));
 const AdminDashboardPage = lazy(() => import('./pages/AdminDashboardPage.jsx'));
 const AuditLogsPage = lazy(() => import('./pages/AuditLogsPage.jsx'));
 
@@ -123,6 +124,7 @@ export const App = () => {
               <Route path="reports" element={<ReportsPage />} />
               <Route path="calendar" element={<CalendarPage />} />
               <Route path="follow-ups" element={<FollowUpsPage />} />
+              <Route path="follow-ups-positives" element={<FollowUpsPositivesPage />} />
 
               {/* Admin Scoped views */}
               <Route path="admin/dashboard" element={

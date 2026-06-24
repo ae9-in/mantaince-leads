@@ -184,10 +184,10 @@ export const deleteVertical = async (req, res) => {
     const { id } = req.params;
     try {
         // First check for active leads linked to the vertical
-        const leadsRes = await query('SELECT COUNT(*) FROM leads WHERE vertical_id = $1 AND is_deleted = false', [id]);
+        const leadsRes = await query('SELECT COUNT(*) FROM cost_conversions WHERE vertical_id = $1 AND is_deleted = false', [id]);
 
         if (parseInt(leadsRes.rows[0].count, 10) > 0) {
-            return res.status(409).json({ success: false, error: 'Cannot delete vertical. Active leads are linked to it.' });
+            return res.status(409).json({ success: false, error: 'Cannot delete vertical. Active Cost/Conversions are linked to it.' });
         }
 
         // Only delete if no active leads are linked
@@ -382,10 +382,10 @@ export const deleteSubVertical = async (req, res) => {
         }
 
         const leadsRes = await query(
-            'SELECT COUNT(*) FROM leads WHERE sub_vertical_id = $1 AND is_deleted = false', [subId]
+            'SELECT COUNT(*) FROM cost_conversions WHERE sub_vertical_id = $1 AND is_deleted = false', [subId]
         );
         if (parseInt(leadsRes.rows[0].count, 10) > 0) {
-            return res.status(409).json({ success: false, error: 'Active leads are linked to this sub-vertical' });
+            return res.status(409).json({ success: false, error: 'Active Cost/Conversions are linked to this sub-vertical' });
         }
 
         const subRes = await query('DELETE FROM sub_verticals WHERE id = $1 RETURNING *', [subId]);

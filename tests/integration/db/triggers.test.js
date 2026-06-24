@@ -37,11 +37,11 @@ describe('Database Triggers Integration', () => {
     }
   });
 
-  it('automatically populates search_vector on leads insert', async () => {
+  it('automatically populates search_vector on cost_conversions insert', async () => {
     const randomPhone = '+1555' + Math.floor(100000 + Math.random() * 900000);
-    // Create new lead
+    // Create new cost conversion
     const res = await request(app)
-      .post('/api/v1/leads')
+      .post('/api/v1/cost-conversions')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
         name: 'Triggy Test',
@@ -58,10 +58,10 @@ describe('Database Triggers Integration', () => {
     expect(leadId).toBeTruthy();
 
     // Query search_vector
-    const dbRes = await query('SELECT search_vector::text FROM leads WHERE id = $1', [leadId]);
+    const dbRes = await query('SELECT search_vector::text FROM cost_conversions WHERE id = $1', [leadId]);
     expect(dbRes.rows[0].search_vector).toContain('triggi');
 
     // Clean up
-    await query('DELETE FROM leads WHERE id = $1', [leadId]);
+    await query('DELETE FROM cost_conversions WHERE id = $1', [leadId]);
   });
 });

@@ -24,9 +24,10 @@ const testState = {
   subVerticalAId: '',
   subVerticalBId: '',
   fieldAId: '',
-  leadAId: '',
+  costConversionAId: '',
   verticalAdminId: '',
   agentId: '',
+  escalationId: '',
   report: []
 };
 
@@ -100,102 +101,94 @@ async function runTests() {
       throw err;
     }
 
-    // Create Sub-Verticals
-    try {
-      const subARes = await axios.post(`${API_URL}/verticals/${testState.verticalAId}/sub-verticals`, {
-        name: 'Used Cars Dealerships'
-      }, { headers: superAdminHeaders });
-      testState.subVerticalAId = subARes.data.data.id;
-
-      const subBRes = await axios.post(`${API_URL}/verticals/${testState.verticalBId}/sub-verticals`, {
-        name: 'Dental Clinics Private'
-      }, { headers: superAdminHeaders });
-      testState.subVerticalBId = subBRes.data.data.id;
-
-      logTestResult('Sub-Vertical Creation', 'PASSED', `Created Sub-Vertical A (ID: ${testState.subVerticalAId}) and Sub-Vertical B (ID: ${testState.subVerticalBId}).`);
-    } catch (err) {
-      logTestResult('Sub-Vertical Creation', 'FAILED', err.message);
-      throw err;
-    }
-
     // -------------------------------------------------------------
-    // 3. USER MANAGEMENT & RBAC SETUP
+    // 3. USER MANAGEMENT & VERTICAL ASSIGNMENT
     // -------------------------------------------------------------
-    console.log('\n--- 3. Setting Up Vertical Admin & Agent Users ---');
-    const uniqueEmailSuffix = Date.now();
-    const vertAdminEmail = `vert_admin_${uniqueEmailSuffix}@leadsbase.io`;
-    const agentEmail = `agent_${uniqueEmailSuffix}@leadsbase.io`;
-
+    console.log('\n--- 3. Testing User Scoping & Invitation ---');
+    const uniqueVal = Date.now();
     try {
-      // Create Vertical Admin (Assigned access to Vertical A only)
+      // Invite Vertical Admin
       const inviteAdminRes = await axios.post(`${API_URL}/users/invite`, {
-        name: 'John Vertical Admin',
-        email: vertAdminEmail,
-        role: 'vertical_admin',
-        password: 'password123',
+        name: 'John Admin',
+        email: `admin_${uniqueVal}@gmail.com`,
+        roleName: 'vertical_admin',
         verticalAccess: [testState.verticalAId]
       }, { headers: superAdminHeaders });
+      
+      const adminInviteToken = inviteAdminRes.data.data.inviteToken;
       testState.verticalAdminId = inviteAdminRes.data.data.id;
 
-      // Create Agent (Assigned access to Vertical A only)
+      // Complete registration for Vertical Admin
+      const registerAdminRes = await axios.post(`${API_URL}/auth/register`, {
+        token: adminInviteToken,
+        password: 'adminpassword123'
+      });
+      testState.verticalAdminToken = registerAdminRes.data.data.accessToken;
+
+      // Invite Agent
       const inviteAgentRes = await axios.post(`${API_URL}/users/invite`, {
         name: 'Bob Agent',
-        email: agentEmail,
-        role: 'agent',
-        password: 'password123',
+        email: `agent_${uniqueVal}@gmail.com`,
+        roleName: 'agent',
         verticalAccess: [testState.verticalAId]
       }, { headers: superAdminHeaders });
+      
+      const agentInviteToken = inviteAgentRes.data.data.inviteToken;
       testState.agentId = inviteAgentRes.data.data.id;
 
-      logTestResult('User Invitations and Vertical Access Assignment', 'PASSED', `Created Vertical Admin (${vertAdminEmail}) and Agent (${agentEmail}) scoped to Vertical A.`);
-    } catch (err) {
-      logTestResult('User Invitations and Vertical Access Assignment', 'FAILED', err.message);
-      throw err;
-    }
-
-    // Log in as Vertical Admin
-    try {
-      const vertAdminLogin = await axios.post(`${API_URL}/auth/login`, {
-        email: vertAdminEmail,
-        password: 'password123'
+      // Complete registration for Agent
+      const registerAgentRes = await axios.post(`${API_URL}/auth/register`, {
+        token: agentInviteToken,
+        password: 'agentpassword123'
       });
-      testState.verticalAdminToken = vertAdminLogin.data.data.accessToken;
-      logTestResult('Vertical Admin Login', 'PASSED', 'Acquired token.');
-    } catch (err) {
-      logTestResult('Vertical Admin Login', 'FAILED', err.message);
-      throw err;
-    }
+      testState.agentToken = registerAgentRes.data.data.accessToken;
 
-    // Log in as Agent
-    try {
-      const agentLogin = await axios.post(`${API_URL}/auth/login`, {
-        email: agentEmail,
-        password: 'password123'
-      });
-      testState.agentToken = agentLogin.data.data.accessToken;
-      logTestResult('Agent Login', 'PASSED', 'Acquired token.');
+      logTestResult('Scoped User Onboarding', 'PASSED', 'Successfully created scoped Admin and Agent accounts.');
     } catch (err) {
-      logTestResult('Agent Login', 'FAILED', err.message);
+      logTestResult('Scoped User Onboarding', 'FAILED', err.message);
       throw err;
     }
 
     const vertAdminHeaders = { Authorization: `Bearer ${testState.verticalAdminToken}` };
     const agentHeaders = { Authorization: `Bearer ${testState.agentToken}` };
 
+    // Create Sub-Verticals
+    try {
+      const subARes = await axios.post(`${API_URL}/verticals/${testState.verticalAId}/sub-verticals`, {
+        name: 'Auto Dealerships'
+      }, { headers: vertAdminHeaders });
+      testState.subVerticalAId = subARes.data.data.id;
+
+      const subBRes = await axios.post(`${API_URL}/verticals/${testState.verticalBId}/sub-verticals`, {
+        name: 'Hospitals Group'
+      }, { headers: superAdminHeaders });
+      testState.subVerticalBId = subBRes.data.data.id;
+
+      // Assign Bob Agent to Sub-Vertical A
+      await axios.patch(`${API_URL}/users/${testState.agentId}/verticals`, {
+        verticalAccess: [testState.verticalAId],
+        subVerticalAccess: [testState.subVerticalAId]
+      }, { headers: superAdminHeaders });
+
+      logTestResult('Sub-Vertical Scoping and Agent Assignment', 'PASSED', `Sub-Vertical A (ID: ${testState.subVerticalAId}) assigned to Agent Bob.`);
+    } catch (err) {
+      logTestResult('Sub-Vertical Scoping and Agent Assignment', 'FAILED', err.message);
+    }
+
     // -------------------------------------------------------------
-    // 4. TESTING VERTICAL SECURITY BOUNDS (ROUTING & ROW-LEVEL SCOPING)
+    // 4. VERTICAL-ADMIN BOUNDARY TESTS
     // -------------------------------------------------------------
-    console.log('\n--- 4. Testing Vertical Admin Access Scopes ---');
+    console.log('\n--- 4. Testing Vertical Admin Restrictions ---');
     
-    // 4a. Retrieve Vertical A (Should pass)
+    // 4a. Read vertical A (Should pass)
     try {
       const res = await axios.get(`${API_URL}/verticals/${testState.verticalAId}`, { headers: vertAdminHeaders });
-      logTestResult('Vertical Admin: Read Authorized Vertical', 'PASSED', `Successfully read Vertical A data: ${res.data.data.name}`);
+      logTestResult('Vertical Admin: Read Authorized Vertical', 'PASSED', `Successfully read vertical: ${res.data.data.name}`);
     } catch (err) {
       logTestResult('Vertical Admin: Read Authorized Vertical', 'FAILED', err.message);
     }
 
-    // 4b. Retrieve Vertical B (Should fail with 403 Forbidden)
+    // 4b. Read vertical B (Should fail with 403 Forbidden)
     try {
       await axios.get(`${API_URL}/verticals/${testState.verticalBId}`, { headers: vertAdminHeaders });
       logTestResult('Vertical Admin: Read Unauthorized Vertical', 'FAILED', 'Succeeded to read Vertical B but was expected to fail.');
@@ -257,13 +250,13 @@ async function runTests() {
     }
 
     // -------------------------------------------------------------
-    // 5. TESTING LEADS OPERATIONS & VERTICAL SECURITY BOUNDS
+    // 5. TESTING COST/CONVERSIONS OPERATIONS & VERTICAL SECURITY BOUNDS
     // -------------------------------------------------------------
-    console.log('\n--- 5. Testing Leads Scopes ---');
+    console.log('\n--- 5. Testing Cost/Conversion Scopes ---');
 
-    // 5a. Create lead in Vertical A (Should succeed)
+    // 5a. Create cost conversion in Vertical A (Should succeed)
     try {
-      const res = await axios.post(`${API_URL}/leads`, {
+      const res = await axios.post(`${API_URL}/cost-conversions`, {
         name: 'Lead Customer A',
         phone: '+1555010099',
         businessName: 'Toyota Dealership',
@@ -272,53 +265,123 @@ async function runTests() {
         assignedTo: testState.agentId,
         data: { vehicle_model: 'Toyota Camry' }
       }, { headers: vertAdminHeaders });
-      testState.leadAId = res.data.data.id;
-      logTestResult('Vertical Admin: Create Lead in Authorized Vertical', 'PASSED', `Created Lead ID: ${testState.leadAId}`);
+      testState.costConversionAId = res.data.data.id;
+      logTestResult('Vertical Admin: Create Cost/Conversion in Authorized Vertical', 'PASSED', `Created Cost/Conversion ID: ${testState.costConversionAId}`);
     } catch (err) {
-      logTestResult('Vertical Admin: Create Lead in Authorized Vertical', 'FAILED', err.message);
+      logTestResult('Vertical Admin: Create Cost/Conversion in Authorized Vertical', 'FAILED', err.message);
     }
 
-    // 5b. Create lead in Vertical B (Should fail with 403 Forbidden)
+    // 5b. Create cost conversion in Vertical B (Should fail with 403 Forbidden)
     try {
-      await axios.post(`${API_URL}/leads`, {
+      await axios.post(`${API_URL}/cost-conversions`, {
         name: 'Patient Test Lead',
         phone: '+4420794609',
         verticalId: testState.verticalBId,
         subVerticalId: testState.subVerticalBId,
         data: {}
       }, { headers: vertAdminHeaders });
-      logTestResult('Vertical Admin: Create Lead in Unauthorized Vertical', 'FAILED', 'Succeeded to create lead but was expected to fail.');
+      logTestResult('Vertical Admin: Create Cost/Conversion in Unauthorized Vertical', 'FAILED', 'Succeeded to create cost conversion but was expected to fail.');
     } catch (err) {
       if (err.response && err.response.status === 403) {
-        logTestResult('Vertical Admin: Create Lead in Unauthorized Vertical', 'PASSED', 'Correctly blocked lead creation with 403 Forbidden.');
+        logTestResult('Vertical Admin: Create Cost/Conversion in Unauthorized Vertical', 'PASSED', 'Correctly blocked creation with 403 Forbidden.');
       } else {
-        logTestResult('Vertical Admin: Create Lead in Unauthorized Vertical', 'FAILED', `Expected 403 but got: ${err.message}`);
+        logTestResult('Vertical Admin: Create Cost/Conversion in Unauthorized Vertical', 'FAILED', `Expected 403 but got: ${err.message}`);
       }
     }
 
-    // 5c. Agent retrieval check (Should see own leads in Vertical A)
+    // 5c. Agent retrieval check (Should see own cost conversions in Vertical A)
     try {
-      const res = await axios.get(`${API_URL}/leads?verticalId=${testState.verticalAId}`, { headers: agentHeaders });
-      const leads = res.data.data;
-      if (leads.length > 0) {
-        logTestResult('Agent: Retrieve Assigned Leads', 'PASSED', `Retrieved ${leads.length} leads assigned to agent.`);
+      const res = await axios.get(`${API_URL}/cost-conversions?verticalId=${testState.verticalAId}`, { headers: agentHeaders });
+      const items = res.data.data;
+      if (items.length > 0) {
+        logTestResult('Agent: Retrieve Assigned Cost/Conversions', 'PASSED', `Retrieved ${items.length} items assigned to agent.`);
       } else {
-        logTestResult('Agent: Retrieve Assigned Leads', 'FAILED', 'No leads retrieved.');
+        logTestResult('Agent: Retrieve Assigned Cost/Conversions', 'FAILED', 'No items retrieved.');
       }
     } catch (err) {
-      logTestResult('Agent: Retrieve Assigned Leads', 'FAILED', err.message);
+      logTestResult('Agent: Retrieve Assigned Cost/Conversions', 'FAILED', err.message);
     }
 
-    // 5d. Agent vertical boundary check (Should fail to read Vertical B leads)
+    // 5d. Agent vertical boundary check (Should fail to read Vertical B cost conversions)
     try {
-      await axios.get(`${API_URL}/leads?verticalId=${testState.verticalBId}`, { headers: agentHeaders });
-      logTestResult('Agent: Read Unauthorized Vertical Leads', 'FAILED', 'Succeeded to read leads but was expected to fail.');
+      await axios.get(`${API_URL}/cost-conversions?verticalId=${testState.verticalBId}`, { headers: agentHeaders });
+      logTestResult('Agent: Read Unauthorized Vertical Cost/Conversions', 'FAILED', 'Succeeded to read but was expected to fail.');
     } catch (err) {
       if (err.response && err.response.status === 403) {
-        logTestResult('Agent: Read Unauthorized Vertical Leads', 'PASSED', 'Correctly blocked with 403 Forbidden.');
+        logTestResult('Agent: Read Unauthorized Vertical Cost/Conversions', 'PASSED', 'Correctly blocked with 403 Forbidden.');
       } else {
-        logTestResult('Agent: Read Unauthorized Vertical Leads', 'FAILED', `Expected 403 but got: ${err.message}`);
+        logTestResult('Agent: Read Unauthorized Vertical Cost/Conversions', 'FAILED', `Expected 403 but got: ${err.message}`);
       }
+    }
+
+    // -------------------------------------------------------------
+    // 5.5 ESCALATION FUNCTIONALITY TESTS
+    // -------------------------------------------------------------
+    console.log('\n--- 5.5 Testing Pass To / Escalate Feature ---');
+    
+    // 5.5a. Escalate to Vertical Admin (Should succeed)
+    try {
+      const res = await axios.post(`${API_URL}/cost-conversions/${testState.costConversionAId}/escalations`, {
+        escalatedToId: testState.verticalAdminId,
+        reason: 'Client demands discount greater than agent authority limit.'
+      }, { headers: agentHeaders });
+      testState.escalationId = res.data.data.id;
+      logTestResult('Agent: Escalate to Admin', 'PASSED', `Escalated successfully. Escalation ID: ${testState.escalationId}`);
+    } catch (err) {
+      logTestResult('Agent: Escalate to Admin', 'FAILED', err.message);
+    }
+
+    // 5.5b. Escalate to non-admin Agent Bob (Should fail with 400 Bad Request)
+    try {
+      await axios.post(`${API_URL}/cost-conversions/${testState.costConversionAId}/escalations`, {
+        escalatedToId: testState.agentId,
+        reason: 'Attempting invalid escalation'
+      }, { headers: vertAdminHeaders });
+      logTestResult('Admin: Escalate to non-Admin user', 'FAILED', 'Escalation succeeded but was expected to fail.');
+    } catch (err) {
+      if (err.response && err.response.status === 400) {
+        logTestResult('Admin: Escalate to non-Admin user', 'PASSED', 'Correctly rejected escalation with 400 Bad Request.');
+      } else {
+        logTestResult('Admin: Escalate to non-Admin user', 'FAILED', `Expected 400 but got: ${err.message}`);
+      }
+    }
+
+    // 5.5c. Fetch escalations for cost conversion
+    try {
+      const res = await axios.get(`${API_URL}/cost-conversions/${testState.costConversionAId}/escalations`, { headers: vertAdminHeaders });
+      if (res.data.data.length > 0) {
+        logTestResult('Admin: Fetch Cost/Conversion Escalations', 'PASSED', `Found ${res.data.data.length} escalations.`);
+      } else {
+        logTestResult('Admin: Fetch Cost/Conversion Escalations', 'FAILED', 'No escalations found.');
+      }
+    } catch (err) {
+      logTestResult('Admin: Fetch Cost/Conversion Escalations', 'FAILED', err.message);
+    }
+
+    // 5.5d. Fetch admin escalations inbox
+    try {
+      const res = await axios.get(`${API_URL}/admin/escalations/inbox?status=OPEN`, { headers: vertAdminHeaders });
+      if (res.data.data.length > 0) {
+        logTestResult('Admin: Fetch Escalations Inbox', 'PASSED', `Found ${res.data.data.length} pending items in inbox.`);
+      } else {
+        logTestResult('Admin: Fetch Escalations Inbox', 'FAILED', 'Inbox is empty.');
+      }
+    } catch (err) {
+      logTestResult('Admin: Fetch Escalations Inbox', 'FAILED', err.message);
+    }
+
+    // 5.5e. Resolve escalation (Should succeed)
+    try {
+      const res = await axios.put(`${API_URL}/escalations/${testState.escalationId}/resolve`, {
+        resolutionNote: 'Approved 15% custom discount.'
+      }, { headers: vertAdminHeaders });
+      if (res.data.data.status === 'RESOLVED') {
+        logTestResult('Admin: Resolve Escalation', 'PASSED', 'Successfully resolved escalation.');
+      } else {
+        throw new Error('Status not updated to RESOLVED');
+      }
+    } catch (err) {
+      logTestResult('Admin: Resolve Escalation', 'FAILED', err.message);
     }
 
     // -------------------------------------------------------------
@@ -358,6 +421,52 @@ async function runTests() {
     console.error('\n💥 Integration test crashed globally:', globalError.message);
   } finally {
     writeAuditFile();
+    // Self-cleanup: remove test-created verticals and their cost/conversions so DB stays pristine
+    await cleanupTestData();
+  }
+}
+
+async function cleanupTestData() {
+  try {
+    console.log('\n🧹 Post-test cleanup: removing test data...');
+    const loginRes = await axios.post(`${API_URL}/auth/login`, superAdminCredentials);
+    if (!loginRes.data.success) return;
+    const token = loginRes.data.data.accessToken;
+    const headers = { Authorization: `Bearer ${token}` };
+
+    // Cleanup test verticals (A and B from the state)
+    const testVertIds = [testState.verticalAId, testState.verticalBId].filter(Boolean);
+    for (const vid of testVertIds) {
+      try {
+        // First delete all cost conversions in this vertical
+        const ccRes = await axios.get(`${API_URL}/cost-conversions?verticalId=${vid}&limit=1000`, { headers });
+        const ccs = ccRes.data.data || [];
+        for (const cc of ccs) {
+          const ccId = cc._id || cc.id;
+          await axios.delete(`${API_URL}/cost-conversions/${ccId}`, { headers }).catch(() => {});
+        }
+        await axios.delete(`${API_URL}/verticals/${vid}`, { headers });
+        console.log('  ✅ Cleaned up test vertical:', vid);
+      } catch (e) {
+        console.log('  ⚠️ Could not clean vertical', vid + ':', e.response?.data?.error || e.message);
+      }
+    }
+
+    // Cleanup test users (vertical admin and agent created during test)
+    const testUserIds = [testState.verticalAdminId, testState.agentId].filter(Boolean);
+    for (const uid of testUserIds) {
+      try {
+        await axios.delete(`${API_URL}/users/${uid}`, { headers });
+        console.log('  ✅ Cleaned up test user:', uid);
+      } catch (e) {
+        // Users may not have a DELETE endpoint - that's fine
+        console.log('  ℹ️ User cleanup skipped for', uid, '(may not support DELETE)');
+      }
+    }
+
+    console.log('✅ Post-test cleanup complete.');
+  } catch (e) {
+    console.log('⚠️ Post-test cleanup error (non-fatal):', e.message);
   }
 }
 

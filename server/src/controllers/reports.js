@@ -4,7 +4,7 @@ import { CacheKeys, TTL } from '../lib/cacheKeys.js';
 
 /**
  * GET /reports/status-distribution
- * Cached 5 min — heavy GROUP BY on potentially large leads table.
+ * Cached 5 min — heavy GROUP BY on potentially large cost_conversions table.
  */
 export const getStatusDistribution = async (req, res) => {
     const { verticalId, dateFrom, dateTo } = req.query;
@@ -14,7 +14,7 @@ export const getStatusDistribution = async (req, res) => {
         const cacheKey = `${CacheKeys.reportStatus(verticalId)}:${dateFrom ?? ''}:${dateTo ?? ''}`;
 
         const data = await withCache(cacheKey, TTL.REPORTS, async () => {
-            let sql   = 'SELECT status AS _id, COUNT(*) AS count FROM leads WHERE vertical_id = $1 AND is_deleted = false';
+            let sql   = 'SELECT status AS _id, COUNT(*) AS count FROM cost_conversions WHERE vertical_id = $1 AND is_deleted = false';
             const params = [verticalId];
             let   pIdx   = 2;
 
@@ -44,7 +44,7 @@ export const getAreaDistribution = async (req, res) => {
         const data = await withCache(CacheKeys.reportArea(verticalId), TTL.REPORTS, async () => {
             const res2 = await query(`
                 SELECT data->>'area' AS _id, COUNT(*) AS count
-                FROM leads
+                FROM cost_conversions
                 WHERE vertical_id = $1 AND is_deleted = false AND data ? 'area'
                 GROUP BY data->>'area'
                 ORDER BY count DESC
@@ -75,7 +75,7 @@ export const getConversionOverTime = async (req, res) => {
                     EXTRACT(WEEK FROM created_at)  AS week,
                     COUNT(*)                       AS total,
                     COUNT(*) FILTER (WHERE status = 'converted') AS converted
-                FROM leads
+                FROM cost_conversions
                 WHERE vertical_id = $1 AND is_deleted = false
                   AND created_at >= NOW() - INTERVAL '90 days'
                 GROUP BY year, week
@@ -113,7 +113,7 @@ export const getAgentPerformance = async (req, res) => {
                         ELSE 0
                     END)::float                                               AS "conversionRate"
                 FROM users u
-                JOIN leads l ON l.assigned_to = u.id
+                JOIN cost_conversions l ON l.assigned_to = u.id
                 WHERE l.vertical_id = $1 AND l.is_deleted = false
                 GROUP BY u.id, u.name, u.email
                 ORDER BY "conversionRate" DESC
@@ -146,7 +146,7 @@ export const getReportsSummary = async (req, res) => {
         const [statusDist, areaDist, conversionTime, agentPerf] = await Promise.all([
             // 1. Status Distribution
             withCache(statusKey, TTL.REPORTS, async () => {
-                let sql = 'SELECT status AS _id, COUNT(*) AS count FROM leads WHERE vertical_id = $1 AND is_deleted = false';
+                let sql = 'SELECT status AS _id, COUNT(*) AS count FROM cost_conversions WHERE vertical_id = $1 AND is_deleted = false';
                 const params = [verticalId];
                 let pIdx = 2;
                 if (dateFrom) { sql += ` AND created_at >= $${pIdx++}`; params.push(dateFrom); }
@@ -160,7 +160,7 @@ export const getReportsSummary = async (req, res) => {
             withCache(areaKey, TTL.REPORTS, async () => {
                 let sql = `
                     SELECT data->>'area' AS _id, COUNT(*) AS count
-                    FROM leads
+                    FROM cost_conversions
                     WHERE vertical_id = $1 AND is_deleted = false AND data ? 'area'
                 `;
                 const params = [verticalId];
@@ -180,7 +180,7 @@ export const getReportsSummary = async (req, res) => {
                         EXTRACT(WEEK FROM created_at)  AS week,
                         COUNT(*)                       AS total,
                         COUNT(*) FILTER (WHERE status = 'converted') AS converted
-                    FROM leads
+                    FROM cost_conversions
                     WHERE vertical_id = $1 AND is_deleted = false
                 `;
                 const params = [verticalId];
@@ -215,7 +215,7 @@ export const getReportsSummary = async (req, res) => {
                             ELSE 0
                         END)::float                                               AS "conversionRate"
                     FROM users u
-                    JOIN leads l ON l.assigned_to = u.id
+                    JOIN cost_conversions l ON l.assigned_to = u.id
                     WHERE l.vertical_id = $1 AND l.is_deleted = false
                 `;
                 const params = [verticalId];

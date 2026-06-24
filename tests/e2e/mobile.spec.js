@@ -8,6 +8,7 @@ test.describe('Mobile Viewport E2E Flow', () => {
     await page.fill('input[type="email"]', 'admin@gmail.com');
     await page.fill('input[type="password"]', 'admin123');
     await page.click('button[type="submit"]');
+    await page.waitForURL('**/leads**');
   });
 
   test('collapses navigation menu on small viewport', async ({ page }) => {

@@ -10,9 +10,9 @@ const router = express.Router();
 router.use(authenticate);
 router.use(attachRole);
 
-router.get('/', checkPermission('users:read'), getUsers);
+router.get('/', checkPermission(['users:read', 'leads:read_own']), getUsers);
 router.post('/invite', checkPermission('users:invite'), inviteUser);
-router.get('/:id', checkPermission('users:read'), getUserById);
+router.get('/:id', checkPermission(['users:read', 'leads:read_own']), getUserById);
 router.patch('/:id', checkPermission('users:update'), updateUser);
 router.patch('/:id/role', checkPermission('users:role_change'), changeUserRole);
 router.patch('/:id/verticals', checkPermission('users:verticals_change'), assignUserVerticals);

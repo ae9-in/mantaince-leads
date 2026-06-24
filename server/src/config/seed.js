@@ -54,7 +54,12 @@ export const seedDatabase = async () => {
   }
 };
 
+import { fileURLToPath } from 'url';
+import path from 'path';
+
 // If run directly
-if (import.meta.url.endsWith(process.argv[1])) {
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (isMain) {
     seedDatabase().then(() => process.exit(0));
 }
+

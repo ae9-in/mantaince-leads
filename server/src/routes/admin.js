@@ -12,7 +12,8 @@ import {
   updateSubVerticalStage,
   deleteSubVerticalStage,
   reorderSubVerticalStages,
-  getAdminDashboardStats
+  getAdminDashboardStats,
+  applyTemplateCustomFields
 } from '../controllers/admin.js';
 import authenticate from '../middleware/authenticate.js';
 import attachRole from '../middleware/attachRole.js';
@@ -30,6 +31,7 @@ router.post('/sub-verticals/:subVerticalId/custom-fields', checkPermission('sub_
 router.patch('/custom-fields/:id', checkPermission('sub_vertical:manage'), updateCustomField);
 router.delete('/custom-fields/:id', checkPermission('sub_vertical:manage'), deleteCustomField);
 router.patch('/sub-verticals/:subVerticalId/custom-fields/reorder', checkPermission('sub_vertical:manage'), reorderCustomFields);
+router.post('/sub-verticals/:subVerticalId/custom-fields/apply-template', checkPermission('sub_vertical:manage'), applyTemplateCustomFields);
 
 // Sub-vertical users
 router.get('/sub-verticals/:subVerticalId/users', checkPermission(['vertical:read', 'leads:read_own']), getUsersBySubVertical);

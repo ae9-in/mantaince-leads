@@ -1,9 +1,16 @@
-/**
- * Assignment Broadcaster Service
- * Manages Server-Sent Events (SSE) connections for real-time assignment updates.
- */
+import pg from 'pg';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { query } from '../config/db.js';
+import { PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE } from '../config/env.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const caBundlePath = path.normalize(path.resolve(__dirname, '../../../global-bundle.pem'));
 
 const clients = new Map(); // Map<userId: string, Set<Response>>
+let listenerClient = null;
 
 /**
  * Register a client's SSE response object
@@ -30,23 +37,114 @@ export const removeClient = (userId, res) => {
 };
 
 /**
- * Broadcast assignment update to a specific user AND all admin clients.
- * @param {string} targetUserId - The user whose assignments changed
- * @param {object} payload - { type: 'ASSIGNMENT_UPDATED', ... }
+ * Send notification via Postgres LISTEN/NOTIFY
  */
-export const broadcast = (targetUserId, payload) => {
-  const data = `data: ${JSON.stringify(payload)}\n\n`;
-
-  // 1. Notify the target user (if they have active sessions)
-  const userClients = clients.get(targetUserId.toString());
-  if (userClients) {
-    userClients.forEach(res => res.write(data));
+export const notifyViaPostgresNotify = async (channel, payload) => {
+  const json = JSON.stringify(payload);
+  if (json.length > 7800) {
+    console.warn('[Realtime] Payload near 8000-byte NOTIFY limit, truncating non-essential fields');
   }
+  await query('SELECT pg_notify($1, $2)', [channel, json]);
+};
 
-  // 2. Notify all admins (so admin panel live-updates too)
-  const adminClients = clients.get('__ADMIN__');
-  if (adminClients) {
-    adminClients.forEach(res => res.write(data));
+/**
+ * Initialize PostgreSQL LISTEN/NOTIFY real-time sync
+ */
+export const initRealtimeListener = async () => {
+  if (listenerClient) return;
+
+  listenerClient = new pg.Client({
+    host:     PGHOST,
+    port:     PGPORT,
+    user:     PGUSER,
+    database: PGDATABASE,
+    password: PGPASSWORD,
+    ssl: {
+      rejectUnauthorized: false,
+      ca: fs.existsSync(caBundlePath) ? fs.readFileSync(caBundlePath).toString() : undefined
+    }
+  });
+
+  try {
+    await listenerClient.connect();
+    console.log('✅ Realtime Listener connected to Postgres.');
+
+    const NOTIFY_CHANNELS = [
+      'assignment_channel',
+      'escalation_channel',
+      'stages_channel',
+      'followup_channel',
+    ];
+
+    for (const channel of NOTIFY_CHANNELS) {
+      await listenerClient.query(`LISTEN ${channel}`);
+    }
+
+    listenerClient.on('notification', (msg) => {
+      try {
+        const payload = JSON.parse(msg.payload);
+        const targetUserId = payload.targetUserId;
+        const sseData = `data: ${msg.payload}\n\n`;
+
+        if (targetUserId) {
+          const userClients = clients.get(targetUserId.toString());
+          if (userClients) {
+            userClients.forEach(res => {
+              try {
+                res.write(sseData);
+              } catch (err) {
+                console.error('[SSE] Write error for user client:', err.message);
+              }
+            });
+          }
+          const adminClients = clients.get('__ADMIN__');
+          if (adminClients) {
+            adminClients.forEach(res => {
+              try {
+                res.write(sseData);
+              } catch (err) {
+                console.error('[SSE] Write error for admin client:', err.message);
+              }
+            });
+          }
+        } else {
+          // Broadcast to all
+          for (const [userId, resSet] of clients.entries()) {
+            for (const res of resSet) {
+              try {
+                res.write(sseData);
+              } catch (err) {
+                console.error('[SSE] Broadcast write error:', err.message);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[Realtime] Failed to parse notification payload:', e);
+      }
+    });
+
+    listenerClient.on('error', (err) => {
+      console.error('[Realtime] Listener connection error, reconnecting:', err);
+      listenerClient = null;
+      setTimeout(initRealtimeListener, 2000);
+    });
+  } catch (err) {
+    console.error('[Realtime] Connection failed, retrying:', err.message);
+    listenerClient = null;
+    setTimeout(initRealtimeListener, 5000);
+  }
+};
+
+/**
+ * Broadcast assignment update to a specific user AND all admin clients.
+ */
+export const broadcast = async (targetUserId, payload) => {
+  const enrichedPayload = { ...payload, targetUserId };
+  try {
+    await notifyViaPostgresNotify('assignment_channel', enrichedPayload);
+  } catch (err) {
+    console.error('[SSE] PG Notify broadcast error:', err.message);
   }
 };
 
@@ -62,18 +160,17 @@ export const closeAllClients = () => {
     }
   }
   clients.clear();
+  if (listenerClient) {
+    listenerClient.end().catch(err => console.error('[Realtime] Error closing listener client:', err.message));
+    listenerClient = null;
+  }
 };
 
-export const broadcastToAll = (payload) => {
-  const data = `data: ${JSON.stringify(payload)}\n\n`;
-  for (const [userId, resSet] of clients.entries()) {
-    for (const res of resSet) {
-      try {
-        res.write(data);
-      } catch (err) {
-        console.error('[SSE] Broadcast error:', err.message);
-      }
-    }
+export const broadcastToAll = async (payload) => {
+  try {
+    await notifyViaPostgresNotify('assignment_channel', payload);
+  } catch (err) {
+    console.error('[SSE] PG Notify broadcastToAll error:', err.message);
   }
 };
 
@@ -82,5 +179,7 @@ export default {
   removeClient,
   broadcast,
   closeAllClients,
-  broadcastToAll
+  broadcastToAll,
+  notifyViaPostgresNotify,
+  initRealtimeListener
 };

@@ -40,9 +40,9 @@ model User {
   inviteTokenExpiry    DateTime?
   verticalAccess       VerticalAccess[]
   assignedSubVerticals UserSubVertical[]
-  leads                Lead[]            @relation("LeadsAssigned")
-  uploadedLeads        Lead[]            @relation("LeadsUploaded")
-  deletedLeads         Lead[]            @relation("LeadsDeleted")
+  costConversions      CostConversion[]  @relation("CostConversionsAssigned")
+  uploadedCostConversions CostConversion[] @relation("CostConversionsUploaded")
+  deletedCostConversions  CostConversion[] @relation("CostConversionsDeleted")
   csvUploadLogs        CsvUploadLog[]
   auditLogs            AuditLog[]
   sessions             Session[]
@@ -53,6 +53,9 @@ model User {
   fieldConfigsCreated  FieldConfig[]
   assignedFollowUps    FollowUp[]        @relation("FollowUpAssignee")
   createdFollowUps     FollowUp[]        @relation("FollowUpCreator")
+  escalationsCreated   Escalation[]      @relation("EscalatedBy")
+  escalationsReceived  Escalation[]      @relation("EscalatedTo")
+  escalationsResolved  Escalation[]      @relation("EscalationResolvedBy")
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
 }
@@ -88,7 +91,7 @@ model Vertical {
   creator        User?            @relation(fields: [createdBy], references: [id])
   subVerticals   SubVertical[]
   fieldConfigs   FieldConfig[]
-  leads          Lead[]
+  costConversions CostConversion[]
   csvUploadLogs  CsvUploadLog[]
   verticalAccess VerticalAccess[]
   createdAt      DateTime         @default(now())
@@ -105,7 +108,7 @@ model SubVertical {
   displayOrder   Int               @default(0)
   createdBy      String?
   creator        User?             @relation(fields: [createdBy], references: [id])
-  leads          Lead[]
+  costConversions CostConversion[]
   userAccess     UserSubVertical[]
   users          UserAssignment[]
   customFields   CustomField[]
@@ -142,7 +145,7 @@ model FieldConfig {
   @@unique([verticalId, fieldKey])
 }
 
-model Lead {
+model CostConversion {
   id            String       @id @default(uuid())
   name          String       @default("")
   phone         String       @default("")
@@ -152,9 +155,9 @@ model Lead {
   subVerticalId String?
   subVertical   SubVertical? @relation(fields: [subVerticalId], references: [id])
   assignedTo    String?
-  assignedUser  User?        @relation("LeadsAssigned", fields: [assignedTo], references: [id])
+  assignedUser  User?        @relation("CostConversionsAssigned", fields: [assignedTo], references: [id])
   uploadedBy    String
-  uploader      User         @relation("LeadsUploaded", fields: [uploadedBy], references: [id])
+  uploader      User         @relation("CostConversionsUploaded", fields: [uploadedBy], references: [id])
   data          Json         @default("{}")
   status        String       @default("new")
   source        String       @default("manual")
@@ -163,16 +166,17 @@ model Lead {
   isDeleted     Boolean      @default(false)
   deletedAt     DateTime?
   deletedBy     String?
-  deletedByUser User?        @relation("LeadsDeleted", fields: [deletedBy], references: [id])
-  leadType      LeadType     @default(CALL)
+  deletedByUser User?        @relation("CostConversionsDeleted", fields: [deletedBy], references: [id])
+  leadType      CostConversionType @default(CALL)
   geotagLat     Float?
   geotagLng     Float?
   geotagAccuracy Float?
   geotagPhotoKey String?
   geotagAddress  String?
   geotagCapturedAt DateTime?
-  customValues  LeadCustomValue[]
+  customValues  CostConversionCustomValue[]
   followUps     FollowUp[]
+  escalations   Escalation[]
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
@@ -196,7 +200,7 @@ model CsvUploadLog {
   processingStartedAt   DateTime?
   processingFinishedAt  DateTime?
   failedRowsDownloadUrl String    @default("")
-  leads                 Lead[]
+  costConversions       CostConversion[]
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 }
@@ -263,7 +267,7 @@ model CustomField {
   createdAt     DateTime        @default(now())
 
   subVertical    SubVertical         @relation(fields: [subVerticalId], references: [id], onDelete: Cascade)
-  leadFieldValues LeadCustomValue[]
+  leadFieldValues CostConversionCustomValue[]
 
   @@unique([subVerticalId, fieldKey])
   @@index([subVerticalId, isActive, order])
@@ -280,24 +284,24 @@ enum CustomFieldType {
   URL
 }
 
-model LeadCustomValue {
-  id            String @id @default(cuid())
-  leadId        String
-  customFieldId String
-  value         String
+model CostConversionCustomValue {
+  id               String @id @default(cuid())
+  costConversionId String
+  customFieldId    String
+  value            String
 
-  lead        Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  customField CustomField @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
+  costConversion CostConversion @relation(fields: [costConversionId], references: [id], onDelete: Cascade)
+  customField    CustomField    @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
 
-  @@unique([leadId, customFieldId])
-  @@index([leadId])
+  @@unique([costConversionId, customFieldId])
+  @@index([costConversionId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // F4 — LEAD TYPE + GEOTAG
 // ─────────────────────────────────────────────────────────────────────────────
 
-enum LeadType {
+enum CostConversionType {
   CALL
   FIELD_VISIT
 }
@@ -308,7 +312,7 @@ enum LeadType {
 
 model FollowUp {
   id            String       @id @default(cuid())
-  leadId        String
+  costConversionId String
   subVerticalId String
   assignedToId  String       // employee (User) assigned to follow up
   createdById   String       // who created this follow-up
@@ -320,12 +324,12 @@ model FollowUp {
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
-  lead        Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  costConversion CostConversion @relation(fields: [costConversionId], references: [id], onDelete: Cascade)
   assignedTo  User  @relation("FollowUpAssignee", fields: [assignedToId], references: [id])
   createdBy   User  @relation("FollowUpCreator", fields: [createdById], references: [id])
   subVertical SubVertical @relation(fields: [subVerticalId], references: [id])
 
-  @@index([leadId, followUpDate])
+  @@index([costConversionId, followUpDate])
   @@index([subVerticalId, followUpDate])       // calendar grid query
   @@index([assignedToId, status, followUpDate]) // "my follow-ups" view
   @@index([followUpDate])                       // date-range queries
@@ -338,3 +342,36 @@ enum FollowUpStatus {
   RESCHEDULED
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// F7 — ESCALATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Escalation {
+  id               String   @id @default(cuid())
+  costConversionId String
+  escalatedById    String
+  escalatedToId    String
+  reason           String
+  status           EscalationStatus @default(OPEN)
+  resolutionNote   String?
+  resolvedById     String?
+  resolvedAt       DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  costConversion   CostConversion @relation(fields: [costConversionId], references: [id], onDelete: Cascade)
+  escalatedBy      User @relation("EscalatedBy",  fields: [escalatedById], references: [id])
+  escalatedTo      User @relation("EscalatedTo",  fields: [escalatedToId], references: [id])
+  resolvedBy       User? @relation("EscalationResolvedBy", fields: [resolvedById], references: [id])
+
+  @@index([costConversionId, status, createdAt(sort: Desc)])
+  @@index([escalatedToId, status])
+  @@index([escalatedById, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+}
+
+enum EscalationStatus {
+  OPEN
+  RESOLVED
+  REJECTED
+}

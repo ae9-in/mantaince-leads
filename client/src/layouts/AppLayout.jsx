@@ -205,7 +205,8 @@ export const AppLayout = () => {
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-0.5">
-          {navLink('/leads', Layers, 'Leads', false)}
+          {navLink('/follow-ups-positives', Calendar, 'Follow-ups/Positives', true)}
+          {navLink('/leads', Layers, 'COS', false)}
           {navLink('/calendar', Calendar, 'Calendar', true)}
           {navLink('/follow-ups', ClipboardList, 'Follow-ups', true)}
           {isAdmin && navLink('/reports', BarChart3, 'Reports', true)}
@@ -292,7 +293,8 @@ export const AppLayout = () => {
             </div>
             <nav className="flex-1 space-y-0.5 text-sm overflow-y-auto">
               {[
-                ['/leads', Layers, 'Leads'],
+                ['/follow-ups-positives', Calendar, 'Follow-ups/Positives'],
+                ['/leads', Layers, 'COS'],
                 ['/calendar', Calendar, 'Calendar'],
                 ['/follow-ups', ClipboardList, 'Follow-ups'],
                 isAdmin ? ['/reports', BarChart3, 'Reports'] : null,

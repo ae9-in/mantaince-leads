@@ -14,17 +14,44 @@ export const getUsers = async (req, res) => {
     let sql = `
       SELECT u.id, u.name, u.email, u.role_id, u.vertical_access,
              u.is_active, u.last_login_at, u.created_by, u.created_at, u.updated_at,
-             r.name AS role_name
+             r.name AS role_name,
+             COALESCE(
+               json_agg(
+                 json_build_object(
+                   'id', sv.id,
+                   'name', sv.name,
+                   'slug', sv.slug,
+                   'verticalId', sv.vertical_id
+                 )
+               ) FILTER (WHERE sv.id IS NOT NULL),
+               '[]'
+             ) AS "assignedSubVerticals"
       FROM users u 
       JOIN roles r ON u.role_id = r.id
+      LEFT JOIN user_assignments ua ON ua.user_id = u.id AND ua.is_active = true
+      LEFT JOIN sub_verticals sv ON ua.sub_vertical_id = sv.id
     `;
     const params = [];
     let whereClauses = [];
     let paramIndex = 1;
 
     if (req.user.role === 'vertical_admin') {
-      whereClauses.push(`u.vertical_access && $${paramIndex++}`);
+      whereClauses.push(`(u.vertical_access && $${paramIndex} OR EXISTS (
+        SELECT 1 FROM user_assignments ua2
+        JOIN sub_verticals sv2 ON ua2.sub_vertical_id = sv2.id
+        WHERE ua2.user_id = u.id AND ua2.is_active = true AND sv2.vertical_id = ANY($${paramIndex})
+      ))`);
       params.push(req.user.verticalAccess);
+      paramIndex++;
+    } else if (req.user.role === 'agent') {
+      whereClauses.push(`u.is_active = true`);
+      whereClauses.push(`(u.vertical_access && $${paramIndex} OR EXISTS (
+        SELECT 1 FROM user_assignments ua2
+        JOIN sub_verticals sv2 ON ua2.sub_vertical_id = sv2.id
+        WHERE ua2.user_id = u.id AND ua2.is_active = true AND sv2.vertical_id = ANY($${paramIndex})
+      ))`);
+      params.push(req.user.verticalAccess || []);
+      paramIndex++;
     }
 
     if (role) {
@@ -32,8 +59,13 @@ export const getUsers = async (req, res) => {
       params.push(role);
     }
     if (vertical) {
-      whereClauses.push(`$${paramIndex++} = ANY(u.vertical_access)`);
+      whereClauses.push(`($${paramIndex} = ANY(u.vertical_access) OR EXISTS (
+        SELECT 1 FROM user_assignments ua2
+        JOIN sub_verticals sv2 ON ua2.sub_vertical_id = sv2.id
+        WHERE ua2.user_id = u.id AND ua2.is_active = true AND sv2.vertical_id = $${paramIndex}
+      ))`);
       params.push(vertical);
+      paramIndex++;
     }
     if (active !== undefined) {
       whereClauses.push(`u.is_active = $${paramIndex++}`);
@@ -44,35 +76,10 @@ export const getUsers = async (req, res) => {
       sql += ' WHERE ' + whereClauses.join(' AND ');
     }
 
+    sql += ` GROUP BY u.id, r.name`;
+
     const usersRes = await query(sql, params);
     const users = usersRes.rows;
-
-    if (users.length > 0) {
-      const userIds = users.map(u => u.id);
-      const assignmentsRes = await query(`
-        SELECT ua.user_id, sv.id, sv.name, sv.slug, sv.vertical_id
-        FROM user_assignments ua
-        JOIN sub_verticals sv ON ua.sub_vertical_id = sv.id
-        WHERE ua.user_id = ANY($1) AND ua.is_active = true
-      `, [userIds]);
-
-      const assignmentsMap = {};
-      assignmentsRes.rows.forEach(row => {
-        if (!assignmentsMap[row.user_id]) {
-          assignmentsMap[row.user_id] = [];
-        }
-        assignmentsMap[row.user_id].push({
-          id: row.id,
-          name: row.name,
-          slug: row.slug,
-          verticalId: row.vertical_id
-        });
-      });
-
-      users.forEach(u => {
-        u.assignedSubVerticals = assignmentsMap[u.id] || [];
-      });
-    }
 
     return res.status(200).json({ success: true, data: users });
   } catch (error) {
@@ -84,12 +91,22 @@ export const getUsers = async (req, res) => {
  * POST /users/invite
  */
 export const inviteUser = async (req, res) => {
-  const { name, email, role, password, verticalAccess = [] } = req.body;
+  const { name, email, role, roleName, password, verticalAccess = [] } = req.body;
   try {
+    const targetRole = roleName || role;
+    if (!targetRole) {
+      return res.status(400).json({ success: false, error: 'Role is required' });
+    }
+
+    const inviteToken = crypto.randomBytes(32).toString('hex');
+    const inviteTokenExpiry = new Date(Date.now() + 86400000); // 24 hours
+
+    const pwdToHash = password || crypto.randomUUID();
+
     const [existsRes, roleRes, passwordHash] = await Promise.all([
       query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]),
-      query('SELECT id FROM roles WHERE name = $1', [role]),
-      bcrypt.hash(password, 12)
+      query('SELECT id FROM roles WHERE name = $1', [targetRole]),
+      bcrypt.hash(pwdToHash, 12)
     ]);
 
     if (existsRes.rows.length > 0) {
@@ -112,11 +129,11 @@ export const inviteUser = async (req, res) => {
     }
 
     const newUserRes = await query(`
-      INSERT INTO users (id, name, email, password_hash, role_id, vertical_access, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO users (id, name, email, password_hash, role_id, vertical_access, created_by, invite_token, invite_token_expiry)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
     `, [
-      userId, name, email.toLowerCase(), passwordHash, roleDoc.id, verticalAccess, req.user.sub
+      userId, name, email.toLowerCase(), passwordHash, roleDoc.id, verticalAccess, req.user.sub, inviteToken, inviteTokenExpiry
     ]);
 
     const newUser = newUserRes.rows[0];
@@ -125,12 +142,19 @@ export const inviteUser = async (req, res) => {
       action: 'user.invite',
       targetCollection: 'users',
       targetId: newUser.id,
-      after: { name, email, role, verticalAccess }
+      after: { name, email, role: targetRole, verticalAccess }
     });
 
     broadcastToAll({ type: 'USER_MUTATED' });
 
-    return res.status(201).json({ success: true, data: newUser });
+    // Make sure inviteToken is returned in the response format expected by tests
+    return res.status(201).json({
+      success: true,
+      data: {
+        ...newUser,
+        inviteToken
+      }
+    });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
@@ -156,14 +180,6 @@ export const getUserById = async (req, res) => {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
 
-    // Check vertical scope bounds for vertical_admin
-    if (req.user.role === 'vertical_admin') {
-      const hasOverlap = userDoc.vertical_access.some(v => req.user.verticalAccess.includes(v));
-      if (!hasOverlap && userDoc.role_name !== 'super_admin') {
-        return res.status(403).json({ success: false, error: 'Forbidden' });
-      }
-    }
-
     const assignmentsRes = await query(`
       SELECT ua.user_id, sv.id, sv.name, sv.slug, sv.vertical_id
       FROM user_assignments ua
@@ -177,6 +193,18 @@ export const getUserById = async (req, res) => {
       slug: row.slug,
       verticalId: row.vertical_id
     }));
+
+    // Check vertical scope bounds for vertical_admin / agent
+    if (req.user.role === 'vertical_admin' || req.user.role === 'agent') {
+      const targetUserVerticals = [
+        ...(Array.isArray(userDoc.vertical_access) ? userDoc.vertical_access.map(String) : []),
+        ...(Array.isArray(userDoc.assignedSubVerticals) ? userDoc.assignedSubVerticals.map(sv => String(sv.verticalId)) : [])
+      ];
+      const hasOverlap = targetUserVerticals.some(v => req.user.verticalAccess.includes(v));
+      if (!hasOverlap && userDoc.role_name !== 'super_admin') {
+        return res.status(403).json({ success: false, error: 'Forbidden' });
+      }
+    }
 
     return res.status(200).json({ success: true, data: userDoc });
   } catch (error) {
@@ -352,8 +380,8 @@ export const deleteUser = async (req, res) => {
     if (hard === 'true') {
       // 1-3. Run checks concurrently to minimize DB round-trip overhead
       const [leadsRes, uploadedRes, followUpsRes] = await Promise.all([
-        query('SELECT COUNT(*) FROM leads WHERE assigned_to = $1 AND is_deleted = false', [id]),
-        query('SELECT COUNT(*) FROM leads WHERE uploaded_by = $1', [id]),
+        query('SELECT COUNT(*) FROM cost_conversions WHERE assigned_to = $1 AND is_deleted = false', [id]),
+        query('SELECT COUNT(*) FROM cost_conversions WHERE uploaded_by = $1', [id]),
         query('SELECT COUNT(*) FROM follow_ups WHERE assigned_to_id = $1 OR created_by_id = $1', [id])
       ]);
 
@@ -361,7 +389,7 @@ export const deleteUser = async (req, res) => {
       if (assignedLeadsCount > 0) {
         return res.status(409).json({
           success: false,
-          error: `Cannot delete user. User currently has ${assignedLeadsCount} active leads assigned.`
+          error: `Cannot delete user. User currently has ${assignedLeadsCount} active Cost/Conversions assigned.`
         });
       }
 
@@ -369,7 +397,7 @@ export const deleteUser = async (req, res) => {
       if (uploadedLeadsCount > 0) {
         return res.status(409).json({
           success: false,
-          error: `Cannot delete user. User has uploaded ${uploadedLeadsCount} leads to the system.`
+          error: `Cannot delete user. User has uploaded ${uploadedLeadsCount} Cost/Conversions to the system.`
         });
       }
 
@@ -399,12 +427,12 @@ export const deleteUser = async (req, res) => {
       return res.status(200).json({ success: true, data: { message: 'User deleted permanently' } });
     } else {
       // Soft deactivation (default)
-      const leadsRes = await query('SELECT COUNT(*) FROM leads WHERE assigned_to = $1 AND is_deleted = false', [id]);
+      const leadsRes = await query('SELECT COUNT(*) FROM cost_conversions WHERE assigned_to = $1 AND is_deleted = false', [id]);
       const assignedLeadsCount = parseInt(leadsRes.rows[0].count, 10);
       if (assignedLeadsCount > 0) {
         return res.status(409).json({
           success: false,
-          error: `Cannot deactivate user. User currently has ${assignedLeadsCount} active leads assigned.`
+          error: `Cannot deactivate user. User currently has ${assignedLeadsCount} active Cost/Conversions assigned.`
         });
       }
 

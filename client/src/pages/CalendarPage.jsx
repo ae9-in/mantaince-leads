@@ -344,32 +344,10 @@ export const CalendarPage = () => {
                     </div>
 
                     {/* Stats pills / follow-up details */}
+                    {/* Stats indicator dots (No text pills display) */}
                     {stats && stats.total > 0 && (
                       <div className="w-full mt-auto overflow-hidden">
-                        {/* Desktop View: Text pills */}
-                        <div className="hidden sm:flex flex-col gap-0.5 w-full">
-                          {stats.items && stats.items.slice(0, 3).map(item => (
-                            <div 
-                              key={item.id} 
-                              className={`text-[8px] px-1 py-0.2 rounded font-bold truncate w-full leading-tight border ${
-                                item.status === 'COMPLETED' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                                item.status === 'PENDING' ? 'bg-amber-50 text-amber-600 border-amber-200' :
-                                'bg-rose-50 text-rose-600 border-rose-200'
-                              }`}
-                              title={`${item.leadBusiness || item.leadName || 'Unnamed'}: ${item.description}`}
-                            >
-                              {item.leadBusiness || item.leadName || 'Unnamed'}
-                            </div>
-                          ))}
-                          {stats.total > 3 && (
-                            <span className="text-[7.5px] text-[--text-muted] font-bold text-center block w-full mt-0.5">
-                              + {stats.total - 3} more
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Mobile View: Small indicator dots */}
-                        <div className="flex flex-wrap gap-0.5 justify-center sm:hidden mt-1 select-none">
+                        <div className="flex flex-wrap gap-0.5 justify-center mt-1 select-none">
                           {stats.items.slice(0, 3).map(item => (
                             <span 
                               key={item.id} 

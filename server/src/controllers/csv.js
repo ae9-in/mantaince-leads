@@ -1,8 +1,13 @@
 import { query } from '../config/db.js';
 import crypto from 'crypto';
 import { logAudit } from '../services/audit.js';
-import { csvQueue } from '../jobs/queue.js';
 import { cacheGet } from '../services/cache.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * GET /leads/csv/template/:verticalId
@@ -26,29 +31,43 @@ export const downloadCsvTemplate = async (req, res) => {
     const configs = configsRes.rows;
 
     const baseHeaders = [
-      'Name',
-      'Number',
-      'Business',
-      'Employee Spoken',
+      'DATE',
+      'EMPLOYEE NAME',
+      'BUSINESS TYPE',
+      'BUSINESS/PERSON/SHOP/COMPANY NAME',
+      'AREA',
+      'CITY',
+      'CONTACT NO',
+      'Point of contact (NAME & NUMBER not mandatory for products)',
+      'REMARKS',
+      'RECORDING',
+      'REQUIREMENT(IF ANY)',
+      'REQUIRE FOLLOW UP (YES/NO)',
+      'FOLLOW UP DATE',
+      'FOLLOW UP REMARKS',
+      'NOTES TO COS TEAM (If any)',
       'Lead Type',
       'Status',
-      'Name Business',
-      'Date',
-      'Delivered Location (Google Maps Location)',
-      'Delivered Link'
     ];
 
     const baseExample = [
-      'John Doe',
-      '+1234567890',
-      'Acme Corp',
+      '2026-06-24',
       'Jane Smith',
-      'Calls',
-      'New',
-      'Acme Corp Office',
-      '2026-06-22',
-      'https://maps.google.com/?q=12.345,67.890',
-      'https://example.com/delivered/report123'
+      'Retail / Wholesale',
+      'Acme Corp',
+      'MG Road',
+      'Bangalore',
+      '+919876543210',
+      'Ramesh Kumar - 9876543210',
+      'Interested in bulk order',
+      '',
+      '50 units of product X',
+      'YES',
+      '2026-06-30',
+      'Call back after 5 PM',
+      '',
+      'CALL',
+      'new',
     ];
 
     const customHeaders = configs.map(c => c.csv_header || c.label);
@@ -79,7 +98,7 @@ export const downloadCsvTemplate = async (req, res) => {
  * POST /leads/csv/upload
  */
 export const uploadCsv = async (req, res) => {
-  const { verticalId, assignedTo, subVerticalId } = req.body;
+  const { verticalId, assignedTo, subVerticalId, leadType = 'CALL' } = req.body;
   const file = req.file;
 
   try {
@@ -92,36 +111,31 @@ export const uploadCsv = async (req, res) => {
       return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
     }
 
-
     let targetAssignedTo = assignedTo;
     if (req.user.role === 'agent') {
       targetAssignedTo = req.user.sub;
     }
 
     const logId = crypto.randomUUID();
+    const fileName = `${logId}.csv`;
+    const uploadPath = path.join(__dirname, '../../uploads', fileName);
+
+    // Save uploaded file buffer to disk
+    fs.writeFileSync(uploadPath, file.buffer);
+
     const logRes = await query(`
-      INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, original_file_name, status)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status, sub_vertical_id, assigned_to, lead_type)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
-    `, [logId, req.user.sub, verticalId, file.originalname, 'queued']);
+    `, [logId, req.user.sub, verticalId, fileName, file.originalname, 'queued', subVerticalId, targetAssignedTo || null, leadType]);
 
     const uploadLog = logRes.rows[0];
-
-    await csvQueue.add({
-      batchId: uploadLog.id,
-      fileBufferBase64: file.buffer.toString('base64'),
-      originalFileName: file.originalname,
-      verticalId,
-      subVerticalId: subVerticalId || null,
-      uploadedBy: req.user.sub,
-      assignedTo: targetAssignedTo || null
-    });
 
     await logAudit(req, {
       action: 'csv.upload_queued',
       targetCollection: 'csv_upload_logs',
       targetId: uploadLog.id,
-      after: { originalFileName: file.originalname, status: 'queued' }
+      after: { originalFileName: file.originalname, status: 'queued', file_name: fileName }
     });
 
     return res.status(202).json({

@@ -7,29 +7,30 @@ import { PORT, CLIENT_URL } from './config/env.js';
 import pool, { connectDB } from './config/db.js';
 import performanceMonitor from './middleware/performance.js';
 import { timingMiddleware } from './middleware/timing.js';
-import { closeAllClients } from './services/assignmentBroadcaster.js';
+import { closeAllClients, initRealtimeListener } from './services/assignmentBroadcaster.js';
 
 // Route imports
 import authRouter from './routes/auth.js';
 import usersRouter from './routes/users.js';
 import verticalsRouter from './routes/verticals.js';
 import configsRouter from './routes/configs.js';
-import leadsRouter from './routes/leads.js';
+import costConversionsRouter from './routes/costConversions.js';
+import escalationsRouter from './routes/escalations.js';
 import auditRouter from './routes/audit.js';
 import reportsRouter from './routes/reports.js';
 import assignmentsRouter from './routes/assignments.js';
 import adminRouter from './routes/admin.js';
 import followUpsRouter from './routes/followUps.js';
-import { csvQueue } from './jobs/queue.js';
-import { processCsvJob } from './jobs/csvProcessor.js';
+import { startImportWorkerLoop } from './jobs/worker.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import net from 'net';
+import { execSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-
 
 // 1. Performance and Optimization Middleware
 app.use(performanceMonitor);
@@ -55,7 +56,13 @@ app.use((req, res, next) => {
 console.log('✓ Compression: gzip active (threshold 1KB)');
 
 // 2. Establish DB Connections
-connectDB();
+connectDB().then(() => {
+  if (process.env.NODE_ENV !== 'test') {
+    initRealtimeListener().catch(err => {
+      console.error('❌ Failed to initialize Realtime Listener:', err.message);
+    });
+  }
+});
 
 // 3. Register Security & Parsing Middlewares
 app.use(helmet({
@@ -73,17 +80,27 @@ app.use(cors({
     if (!origin) {
       return callback(null, true);
     }
+    const isLocalhost = 
+      origin.startsWith('http://localhost:') || 
+      origin.startsWith('http://127.0.0.1:') ||
+      origin === 'http://localhost' ||
+      origin === 'http://127.0.0.1';
+
     const isAllowed = 
       origin === CLIENT_URL ||
       origin === 'http://localhost:5173' ||
       origin === 'http://localhost:3000' ||
+      origin === 'http://127.0.0.1:5173' ||
+      origin === 'http://127.0.0.1:3000' ||
       origin === 'https://mantaince-leads.vercel.app' ||
-      origin.endsWith('.vercel.app');
+      origin.endsWith('.vercel.app') ||
+      isLocalhost;
       
     if (isAllowed) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      console.error(`❌ CORS blocked origin: ${origin}`);
+      callback(new Error(`Not allowed by CORS: ${origin}`));
     }
   },
   credentials: true
@@ -102,7 +119,6 @@ const mapIdToUnderscoreId = (obj) => {
     return obj.map(mapIdToUnderscoreId);
   }
   if (typeof obj === 'object') {
-    // Avoid mapping internal Express/Axios/Buffer or special object classes
     if (obj.constructor && obj.constructor.name !== 'Object' && obj.constructor.name !== 'Array') {
       return obj;
     }
@@ -139,12 +155,23 @@ app.use((req, res, next) => {
   next();
 });
 
+// Compression verification endpoint (placed before auth routers to avoid intercepting middlewares)
+app.get('/api/v1/compression-test-payload', (req, res) => {
+  res.json({
+    message: 'This is a large test payload to verify response compression is active on the server.',
+    data: 'a'.repeat(2000)
+  });
+});
+
 // 4. Register Routes
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/users', usersRouter);
 app.use('/api/v1/verticals', verticalsRouter);
 app.use('/api/v1/configs', configsRouter); // Support field endpoints directly
-app.use('/api/v1/leads', leadsRouter);
+app.use('/api/v1/cost-conversions', costConversionsRouter);
+// Backward-compatibility alias: /api/v1/leads → same router as /api/v1/cost-conversions
+app.use('/api/v1/leads', costConversionsRouter);
+app.use('/api/v1', escalationsRouter); // Mount directly to /api/v1 for standard routes
 app.use('/api/v1/audit-logs', auditRouter);
 app.use('/api/v1/reports', reportsRouter);
 app.use('/api/v1/assignments', assignmentsRouter);
@@ -157,14 +184,6 @@ app.use('/uploads', express.static(path.join(__dirname, '../../uploads'), {
   etag: true,
   lastModified: true
 }));
-
-// Compression verification endpoint
-app.get('/api/v1/compression-test-payload', (req, res) => {
-  res.json({
-    message: 'This is a large test payload to verify response compression is active on the server.',
-    data: 'a'.repeat(2000)
-  });
-});
 
 // Lightweight status checkpoint endpoint
 app.get('/health', (req, res) => {
@@ -218,61 +237,109 @@ app.use((err, req, res, next) => {
   return res.status(err.status || 500).json(response);
 });
 
-// Register Bull Queue Worker in the server process to ensure it runs concurrently
+// Register Aurora DB-backed Import Worker Loop in the server process to ensure it runs concurrently
 if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
-  console.log('👷 Centralized CSV Queue Worker Initializing...');
-  
-  csvQueue.process(async (job) => {
-    console.log(`⏳ Job started: Batch ${job.data.batchId} (Job ID ${job.id})`);
-    try {
-      await processCsvJob(job);
-      console.log(`✅ Job finished successfully: Batch ${job.data.batchId}`);
-    } catch (error) {
-      console.error(`❌ Job failed: Batch ${job.data.batchId} - Error: ${error.message}`);
-      throw error;
-    }
-  });
-
-  csvQueue.on('active', (job) => {
-    console.log(`🏃 Job ${job.id} is now active.`);
-  });
-
-  csvQueue.on('completed', (job) => {
-    console.log(`🎉 Job ${job.id} has completed.`);
-  });
-
-  csvQueue.on('failed', (job, err) => {
-    console.error(`💔 Job ${job.id} failed with error: ${err.message}`);
+  console.log('👷 Centralized CSV DB-backed Queue Worker Initializing...');
+  startImportWorkerLoop().catch(err => {
+    console.error('❌ Failed to start CSV Import Worker Loop:', err.message);
   });
 }
 
-// Start listening
-if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
-  const server = app.listen(PORT, () => {
-    console.log(`🚀 LeadsBase API Listening in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+// ── Helper: free a TCP port by probing with a test socket ────────────────────
+function isPortInUse(port) {
+  return new Promise((resolve) => {
+    const tester = net.createServer()
+      .once('error', () => resolve(true))
+      .once('listening', () => { tester.close(); resolve(false); })
+      .listen(port, '0.0.0.0');
   });
+}
 
-  // Graceful shutdown handler (trigger nodemon restart)
+async function waitForPortFree(port, timeoutMs = 5000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const inUse = await isPortInUse(port);
+    if (!inUse) return true;
+    await new Promise(r => setTimeout(r, 200));
+  }
+  return false;
+}
+
+// Start listening — with EADDRINUSE retry logic
+if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
+  let server;
+
+  // Helper: immediately kill any process holding PORT
+  const forceKillPort = () => {
+    try {
+      const output = execSync('netstat -ano', { encoding: 'utf8' });
+      const pids = new Set();
+      for (const line of output.split('\n')) {
+        if (line.includes(`:${PORT}`) && line.includes('LISTENING')) {
+          const parts = line.trim().split(/\s+/);
+          const pid = parts[parts.length - 1];
+          if (pid && /^\d+$/.test(pid)) pids.add(pid);
+        }
+      }
+      for (const pid of pids) {
+        try {
+          execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore' });
+          console.log(`✅ Freed port ${PORT} (killed PID ${pid})`);
+        } catch (_) {}
+      }
+    } catch (_) {}
+  };
+
+  const startServer = async (attempt = 1) => {
+    if (attempt > 3) {
+      console.error(`❌ Could not start server on port ${PORT} after 3 attempts. Exiting.`);
+      process.exit(1);
+    }
+
+    const inUse = await isPortInUse(PORT);
+    if (inUse) {
+      console.warn(`⚠️  Port ${PORT} busy (attempt ${attempt}). Killing conflicting process...`);
+      forceKillPort();
+      // Wait for OS to release the socket
+      await new Promise(r => setTimeout(r, 1000));
+    }
+
+    server = app.listen(PORT, () => {
+      console.log(`🚀 LeadsBase API Listening in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+    });
+
+    server.on('error', async (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`❌ EADDRINUSE on port ${PORT} (attempt ${attempt}). Killing and retrying...`);
+        server.close();
+        forceKillPort();
+        await new Promise(r => setTimeout(r, 1500));
+        await startServer(attempt + 1);
+      } else {
+        throw err;
+      }
+    });
+  };
+
+  await startServer();
+
+  // Graceful shutdown handler
   const shutdown = async (signal) => {
     console.log(`🛑 ${signal} received — shutting down gracefully...`);
-    
+
     // 1. Close all SSE clients immediately to release handles
-    try {
-      closeAllClients();
-    } catch (err) {
-      console.error('Failed to close SSE clients:', err.message);
-    }
+    try { closeAllClients(); } catch (_) {}
 
-    // 2. Close HTTP server so it stops accepting new connections
+    // 2. Close HTTP server — stop accepting new connections
     if (server) {
-      server.close(() => {
-        console.log('HTTP server closed.');
-      });
+      server.close(() => console.log('HTTP server closed.'));
     }
 
-    // If it's a nodemon restart (SIGUSR2), exit immediately to release port
+    // For nodemon SIGUSR2 — exit immediately so the port is released before restart
     if (signal === 'SIGUSR2') {
-      console.log('Nodemon restart: exiting process immediately to free port.');
+      console.log('Nodemon restart: exiting now to free port.');
+      // Give server.close() ~100ms to actually free the socket
+      await new Promise(r => setTimeout(r, 100));
       process.exit(0);
     }
 
@@ -289,17 +356,13 @@ if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
       console.error('Failed to close database pool:', err.message);
     }
 
-    // Force exit
     process.exit(0);
   };
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.once('SIGUSR2', async () => {
-    await shutdown('SIGUSR2');
-  });
+  process.on('SIGINT',  () => shutdown('SIGINT'));
+  process.once('SIGUSR2', () => shutdown('SIGUSR2'));
 }
-
 
 export default app;
 export { app };

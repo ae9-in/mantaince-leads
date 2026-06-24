@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { broadcast, addClient, removeClient } from '../services/assignmentBroadcaster.js';
 import { logAudit } from '../services/audit.js';
 import { bulkInsert } from '../db/bulkInsert.js';
+import { cacheDelete } from '../services/cache.js';
 
 /**
  * SSE Stream Endpoint
@@ -61,6 +62,9 @@ export const bulkAssign = async (req, res) => {
         { onConflict: 'ON CONFLICT (user_id, sub_vertical_id) DO UPDATE SET is_active = true, updated_at = NOW()' }
       );
     }
+
+    // 3. Invalidate user profile cache so vertical access changes take effect immediately
+    await cacheDelete(`user_profile:${userId}`);
 
     // 3. Fetch full fresh list for broadcast
     const subVertsRes = await query(`

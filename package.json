@@ -6,10 +6,11 @@
   "scripts": {
     "install:all": "npm install && npm install --prefix server && npm install --prefix client",
     "start": "npm run dev",
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
-    "dev:server": "nodemon --watch server/src --ext js,mjs,cjs,json server/src/app.js",
+    "dev": "node scripts/kill-port.js && concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "node server/src/app.js",
     "dev:worker": "nodemon --watch server/src --ext js,mjs,cjs,json server/src/jobs/worker.js",
     "dev:client": "npm run dev --prefix client",
+    "kill:port": "node scripts/kill-port.js",
     "seed": "node server/src/scripts/seed.js",
     "build": "npm run build --prefix client",
     "test:integration": "node server/src/testAllBackend.js",

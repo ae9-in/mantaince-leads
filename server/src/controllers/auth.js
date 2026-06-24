@@ -371,3 +371,81 @@ export const changePassword = async (req, res) => {
     return res.status(500).json({ success: false, error: error.message });
   }
 };
+
+/**
+ * POST /register
+ * Complete registration using invite token
+ */
+export const register = async (req, res) => {
+  const { token, password } = req.body;
+  try {
+    if (!token || !password) {
+      return res.status(400).json({ success: false, error: 'Token and password are required' });
+    }
+
+    // Find user by invite token
+    const userRes = await query(`
+      SELECT u.*, r.name as role_name, r.permissions
+      FROM users u
+      JOIN roles r ON u.role_id = r.id
+      WHERE u.invite_token = $1 AND u.invite_token_expiry > NOW()
+    `, [token]);
+
+    const user = userRes.rows[0];
+    if (!user) {
+      return res.status(400).json({ success: false, error: 'Invalid or expired registration token' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const lastLoginAt = new Date();
+
+    // Update user's password, activate the user, and clear the token
+    await query(`
+      UPDATE users
+      SET password_hash = $1, invite_token = NULL, invite_token_expiry = NULL, is_active = true, last_login_at = $2, updated_at = NOW()
+      WHERE id = $3
+    `, [passwordHash, lastLoginAt, user.id]);
+
+    const accessToken = signAccessToken(user, user.role_name, user.permissions);
+    const refreshToken = signRefreshToken(user.id);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    // Save session refresh hash
+    await query(`
+      INSERT INTO sessions (id, user_id, token_hash, expires_at, ip, user_agent)
+      VALUES ($1, $2, $3, $4, $5, $6)
+    `, [
+      crypto.randomUUID(),
+      user.id,
+      hashToken(refreshToken),
+      expiresAt,
+      req.ip || '',
+      req.headers['user-agent'] || ''
+    ]);
+
+    setRefreshCookie(res, refreshToken);
+
+    await logAudit(null, {
+      action: 'user.register_complete',
+      targetCollection: 'users',
+      targetId: user.id,
+      after: { email: user.email, name: user.name, role: user.role_name }
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        accessToken,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role_name,
+          verticalAccess: user.vertical_access
+        }
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};

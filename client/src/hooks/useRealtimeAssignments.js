@@ -13,7 +13,7 @@ export function useRealtimeAssignments() {
 
       if (payload.type === 'ASSIGNMENT_UPDATED') {
         // If it's our assignment, update the store
-        if (payload.userId === user?.sub) {
+        if (payload.userId === user?.id) {
           setAssignedSubVerticals(payload.assignments);
           toast.success('Your workspace assignments have been updated.', { icon: '🔄' });
         }
@@ -30,7 +30,7 @@ export function useRealtimeAssignments() {
     } catch (e) {
       console.error('[SSE] Parse error:', e);
     }
-  }, [user?.sub, setAssignedSubVerticals, triggerLeadsRefresh]);
+  }, [user?.id, setAssignedSubVerticals, triggerLeadsRefresh]);
 
   useEffect(() => {
     if (!user || !accessToken) return;

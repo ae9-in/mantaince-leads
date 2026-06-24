@@ -43,14 +43,14 @@ async function testBackend() {
         const usersRes = await axios.get(`${API_URL}/users`, { headers });
         console.log('✅ Users retrieved:', usersRes.data.data.length);
 
-        // 5. Test Leads (should be empty but succeed)
-        console.log('\n--- 5. Testing /leads (Empty State) ---');
+        // 5. Test Cost/Conversions (should be empty but succeed)
+        console.log('\n--- 5. Testing /cost-conversions (Empty State) ---');
         if (vertRes.data.data.length > 0) {
             const verticalId = vertRes.data.data[0].id;
-            const leadsRes = await axios.get(`${API_URL}/leads?verticalId=${verticalId}`, { headers });
-            console.log('✅ Leads retrieved:', leadsRes.data.data.length);
+            const leadsRes = await axios.get(`${API_URL}/cost-conversions?verticalId=${verticalId}`, { headers });
+            console.log('✅ Cost/Conversions retrieved:', leadsRes.data.data.length);
         } else {
-            console.log('⏩ Skipping Leads test (no vertical available)');
+            console.log('⏩ Skipping Cost/Conversions test (no vertical available)');
         }
 
         // 6. Test Audit Logs

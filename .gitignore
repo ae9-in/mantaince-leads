@@ -59,3 +59,6 @@ Thumbs.db
 /playwright-report/
 /test-results/
 
+# Temporary scratch directories
+/scratch/
+

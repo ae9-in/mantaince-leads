@@ -1,0 +1,11 @@
+{
+  "watch": ["server/src"],
+  "ext": "js,mjs,cjs,json",
+  "ignore": ["server/src/testAllBackend.js", "**/*.test.js", "**/*.spec.js"],
+  "exec": "node server/src/app.js",
+  "signal": "SIGUSR2",
+  "delay": 500,
+  "env": {
+    "NODE_ENV": "development"
+  }
+}

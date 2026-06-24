@@ -3,7 +3,7 @@ import request from 'supertest';
 import app from '../../../server/src/app.js';
 import { query } from '../../../server/src/config/db.js';
 
-describe('Leads API Integration', () => {
+describe('CostConversions API Integration', () => {
   let adminToken = '';
 
   beforeAll(async () => {
@@ -18,10 +18,10 @@ describe('Leads API Integration', () => {
     }
   });
 
-  describe('GET /api/v1/leads', () => {
-    it('returns 200 and lead list for authorized user', async () => {
+  describe('GET /api/v1/cost-conversions', () => {
+    it('returns 200 and cost conversion list for authorized user', async () => {
       const res = await request(app)
-        .get('/api/v1/leads?verticalId=0f26e60c-09fe-43e3-83c6-b8ece895d365&limit=5')
+        .get('/api/v1/cost-conversions?verticalId=0f26e60c-09fe-43e3-83c6-b8ece895d365&limit=5')
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200);
 
@@ -31,14 +31,14 @@ describe('Leads API Integration', () => {
 
     it('returns 401 for unauthenticated request', async () => {
       await request(app)
-        .get('/api/v1/leads?verticalId=0f26e60c-09fe-43e3-83c6-b8ece895d365')
+        .get('/api/v1/cost-conversions?verticalId=0f26e60c-09fe-43e3-83c6-b8ece895d365')
         .expect(401);
     });
 
     it('responds within 200ms latency threshold', async () => {
       const start = Date.now();
       await request(app)
-        .get('/api/v1/leads?verticalId=0f26e60c-09fe-43e3-83c6-b8ece895d365&limit=10')
+        .get('/api/v1/cost-conversions?verticalId=0f26e60c-09fe-43e3-83c6-b8ece895d365&limit=10')
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200);
 

@@ -9,11 +9,12 @@ import axios from '../api/axios.js';
 import { useUiStore } from '../store/uiStore.js';
 import { useAuthStore } from '../store/authStore.js';
 import EmployeeDropdown from '../components/EmployeeDropdown.jsx';
+import VerticalSelectionBar from '../components/VerticalSelectionBar.jsx';
 import toast from 'react-hot-toast';
 
 export const FollowUpsPage = () => {
   const { user } = useAuthStore();
-  const { activeVertical, leadsRefreshTrigger } = useUiStore();
+  const { activeVertical, setActiveVertical, activeSubVertical, setActiveSubVertical, leadsRefreshTrigger } = useUiStore();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -28,15 +29,10 @@ export const FollowUpsPage = () => {
   const [agents, setAgents] = useState([]);
   const [selectedAgent, setSelectedAgent] = useState(null);
 
-  // Form state for creating/editing
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [selectedFollowUp, setSelectedFollowUp] = useState(null);
-
   const isAdmin = user?.role === 'super_admin' || user?.role === 'vertical_admin';
 
   // Local Filter scopes
   const [verticals, setVerticals] = useState([]);
-  const [selectedVerticalId, setSelectedVerticalId] = useState('');
   const [subVerticals, setSubVerticals] = useState([]);
   const [selectedSubVerticalId, setSelectedSubVerticalId] = useState('');
 
@@ -46,13 +42,6 @@ export const FollowUpsPage = () => {
 
   // Real-time fields status list
   const [fieldStatuses, setFieldStatuses] = useState([]);
-
-  // Sync with global activeVertical initially
-  useEffect(() => {
-    if (activeVertical && !selectedVerticalId) {
-      setSelectedVerticalId(activeVertical._id);
-    }
-  }, [activeVertical]);
 
   // Fetch all verticals on mount
   useEffect(() => {
@@ -70,12 +59,12 @@ export const FollowUpsPage = () => {
   // Fetch sub-verticals when vertical changes
   useEffect(() => {
     const fetchSubVerticals = async () => {
-      if (!selectedVerticalId) {
+      if (!activeVertical?._id) {
         setSubVerticals([]);
         return;
       }
       try {
-        const res = await axios.get(`/api/v1/verticals/${selectedVerticalId}/sub-verticals`);
+        const res = await axios.get(`/api/v1/verticals/${activeVertical._id}/sub-verticals`);
         setSubVerticals(res.data.data || []);
       } catch (err) {
         console.error('Failed to load sub-verticals', err);
@@ -83,12 +72,12 @@ export const FollowUpsPage = () => {
     };
     fetchSubVerticals();
     setSelectedSubVerticalId(''); // reset sub-vertical
-  }, [selectedVerticalId]);
+  }, [activeVertical]);
 
   // Fetch agents for the selected vertical
   useEffect(() => {
     const fetchAgents = async () => {
-      if (!selectedVerticalId) return;
+      if (!activeVertical?._id) return;
       try {
         const res = await axios.get('/api/v1/users');
         const members = res.data.data.filter(u => u.is_active);
@@ -98,11 +87,11 @@ export const FollowUpsPage = () => {
       }
     };
     fetchAgents();
-  }, [selectedVerticalId]);
+  }, [activeVertical]);
 
   // Fetch follow-ups based on filters
   const fetchFollowUps = async () => {
-    if (!selectedVerticalId) return;
+    if (!activeVertical?._id) return;
     setLoading(true);
     try {
       const params = { date: dateStr };
@@ -110,7 +99,7 @@ export const FollowUpsPage = () => {
       if (selectedSubVerticalId) params.subVerticalId = selectedSubVerticalId;
       
       const res = await axios.get(
-        `/api/v1/followUps/verticals/${selectedVerticalId}/follow-ups/by-date`,
+        `/api/v1/followUps/verticals/${activeVertical._id}/follow-ups/by-date`,
         { params }
       );
       setFollowUps(res.data.data || []);
@@ -124,11 +113,11 @@ export const FollowUpsPage = () => {
 
   useEffect(() => {
     fetchFollowUps();
-  }, [selectedVerticalId, selectedSubVerticalId, dateStr, agentId, leadsRefreshTrigger]);
+  }, [activeVertical, selectedSubVerticalId, dateStr, agentId, leadsRefreshTrigger]);
 
   // Fetch vertical stats dashboard
   const fetchStats = async () => {
-    if (!selectedVerticalId || !isAdmin) {
+    if (!activeVertical?._id || !isAdmin) {
       setStats(null);
       return;
     }
@@ -137,7 +126,7 @@ export const FollowUpsPage = () => {
       const params = { date: dateStr };
       if (selectedSubVerticalId) params.subVerticalId = selectedSubVerticalId;
       const res = await axios.get(
-        `/api/v1/followUps/verticals/${selectedVerticalId}/follow-ups/stats`,
+        `/api/v1/followUps/verticals/${activeVertical._id}/follow-ups/stats`,
         { params }
       );
       setStats(res.data.data);
@@ -150,18 +139,18 @@ export const FollowUpsPage = () => {
 
   useEffect(() => {
     fetchStats();
-  }, [selectedVerticalId, selectedSubVerticalId, dateStr, leadsRefreshTrigger]);
+  }, [activeVertical, selectedSubVerticalId, dateStr, leadsRefreshTrigger]);
 
   // Fetch field status details
   useEffect(() => {
     const fetchFieldStatuses = async () => {
-      if (!selectedVerticalId) {
+      if (!activeVertical?._id) {
         setFieldStatuses([]);
         return;
       }
       try {
         const [vertFieldsRes, subFieldsRes] = await Promise.all([
-          axios.get(`/api/v1/configs/verticals/${selectedVerticalId}/fields`),
+          axios.get(`/api/v1/configs/verticals/${activeVertical._id}/fields`),
           selectedSubVerticalId 
             ? axios.get(`/api/v1/admin/sub-verticals/${selectedSubVerticalId}/custom-fields`)
             : Promise.resolve({ data: { data: [] } })
@@ -184,7 +173,7 @@ export const FollowUpsPage = () => {
       }
     };
     fetchFieldStatuses();
-  }, [selectedVerticalId, selectedSubVerticalId, leadsRefreshTrigger]);
+  }, [activeVertical, selectedSubVerticalId, leadsRefreshTrigger]);
 
   // Handle employee selection and show details
   useEffect(() => {
@@ -219,20 +208,6 @@ export const FollowUpsPage = () => {
     }
   };
 
-  const selectedVertical = verticals.find(v => (v._id || v.id) === selectedVerticalId);
-
-  if (!selectedVerticalId) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[400px] text-center p-8 bg-white border border-[--border] rounded-xl">
-        <ClipboardList size={48} className="text-stone-300 mb-4" />
-        <h2 className="text-xl font-bold">No Vertical Selected</h2>
-        <p className="text-sm text-[--text-secondary] mt-2 max-w-sm">
-          Please select a business vertical to view scheduled follow-ups.
-        </p>
-      </div>
-    );
-  }
-
   const filteredFollowUps = followUps.filter(f => status === 'ALL' || f.status === status);
 
   return (
@@ -246,7 +221,7 @@ export const FollowUpsPage = () => {
             <span>Follow-up Management</span>
           </h2>
           <p className="text-xs text-[--text-secondary] mt-1.5 font-medium">
-            Workspace: <strong className="text-[--accent]">{selectedVertical?.name || 'Loading...'}</strong> | Detailed schedule tracking and visit reporting
+            Workspace: <strong className="text-[--accent]">{activeVertical?.name || 'No workspace active'}</strong> | Detailed schedule tracking and visit reporting
           </p>
         </div>
 
@@ -261,247 +236,252 @@ export const FollowUpsPage = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 items-start">
-        
-        {/* Left Column: Filters & Real-time User Details */}
-        <div className="xl:col-span-1 space-y-6">
-          <div className="glass-panel p-5 bg-white border border-[--border] shadow-sm space-y-5">
-            <h3 className="text-xs font-black text-[--text-primary] uppercase tracking-widest border-b border-[--border] pb-3 flex items-center gap-2">
-              <Filter size={14} className="text-[--accent]" />
-              <span>Schedule Filters</span>
-            </h3>
+      {/* Vertical Selector - Always Visible at the Top */}
+      <VerticalSelectionBar
+        verticals={verticals}
+        activeVerticalId={activeVertical?._id}
+        onSelect={(v) => {
+          setActiveVertical(v);
+          setActiveSubVertical(null);
+        }}
+      />
 
-            <div className="space-y-4">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Business Vertical</label>
-                <select 
-                  value={selectedVerticalId}
-                  onChange={(e) => setSelectedVerticalId(e.target.value)}
-                  className="bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-[--accent]"
-                >
-                  <option value="">Select Vertical</option>
-                  {verticals.map(v => (
-                    <option key={v._id || v.id} value={v._id || v.id}>{v.name}</option>
-                  ))}
-                </select>
-              </div>
+      {!activeVertical ? (
+        <div className="flex flex-col items-center justify-center min-h-[350px] text-center p-8 bg-white border border-[--border] rounded-xl shadow-sm">
+          <ClipboardList size={48} className="text-stone-300 mb-4" />
+          <h2 className="text-xl font-bold">No Vertical Selected</h2>
+          <p className="text-sm text-[--text-secondary] mt-2 max-w-sm">
+            Please select a business vertical from the selector above to view scheduled follow-ups.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 items-start">
+          
+          {/* Left Column: Filters & Real-time User Details */}
+          <div className="xl:col-span-1 space-y-6">
+            <div className="glass-panel p-5 bg-white border border-[--border] shadow-sm space-y-5">
+              <h3 className="text-xs font-black text-[--text-primary] uppercase tracking-widest border-b border-[--border] pb-3 flex items-center gap-2">
+                <Filter size={14} className="text-[--accent]" />
+                <span>Schedule Filters</span>
+              </h3>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Sub-Vertical</label>
-                <select 
-                  value={selectedSubVerticalId}
-                  onChange={(e) => setSelectedSubVerticalId(e.target.value)}
-                  className="bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-[--accent]"
-                  disabled={!selectedVerticalId}
-                >
-                  <option value="">All Sub-Verticals</option>
-                  {subVerticals.map(sv => (
-                    <option key={sv._id || sv.id} value={sv._id || sv.id}>{sv.name}</option>
-                  ))}
-                </select>
-              </div>
+              <div className="space-y-4">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Sub-Vertical</label>
+                  <select 
+                    value={selectedSubVerticalId}
+                    onChange={(e) => setSelectedSubVerticalId(e.target.value)}
+                    className="bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-[--accent]"
+                  >
+                    <option value="">All Sub-Verticals</option>
+                    {subVerticals.map(sv => (
+                      <option key={sv._id || sv.id} value={sv._id || sv.id}>{sv.name}</option>
+                    ))}
+                  </select>
+                </div>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Scheduled Date</label>
-                <div className="flex items-center gap-2">
-                  <input 
-                    type="date"
-                    value={dateStr}
-                    onChange={(e) => updateFilter('date', e.target.value)}
-                    className="flex-1 bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-[--accent]"
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Scheduled Date</label>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="date"
+                      value={dateStr}
+                      onChange={(e) => updateFilter('date', e.target.value)}
+                      className="flex-1 bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-[--accent]"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Employee Spoken</label>
+                  <EmployeeDropdown 
+                    employees={agents.map(a => ({ id: a.id || a._id, name: a.name, role: a.role_name || a.role }))}
+                    value={agentId}
+                    onChange={(id) => updateFilter('assignedTo', id)}
+                    placeholder="All Employees"
                   />
                 </div>
-              </div>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Employee Spoken</label>
-                <EmployeeDropdown 
-                  employees={agents.map(a => ({ id: a.id || a._id, name: a.name, role: a.role_name || a.role }))}
-                  value={agentId}
-                  onChange={(id) => updateFilter('assignedTo', id)}
-                  placeholder="All Employees"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Visit Status</label>
-                <select 
-                  value={status}
-                  onChange={(e) => updateFilter('status', e.target.value)}
-                  className="bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-[--accent]"
-                >
-                  <option value="ALL">All Statuses</option>
-                  <option value="PENDING">Pending Visits</option>
-                  <option value="COMPLETED">Completed Visits</option>
-                  <option value="MISSED">Missed Visits</option>
-                </select>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Visit Status</label>
+                  <select 
+                    value={status}
+                    onChange={(e) => updateFilter('status', e.target.value)}
+                    className="bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-[--accent]"
+                  >
+                    <option value="ALL">All Statuses</option>
+                    <option value="PENDING">Pending Visits</option>
+                    <option value="COMPLETED">Completed Visits</option>
+                    <option value="MISSED">Missed Visits</option>
+                  </select>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Real-time Field Configuration Status Widget */}
-          <div className="glass-panel p-5 bg-white border border-[--border] shadow-sm space-y-4">
-            <h3 className="text-xs font-black text-[--text-primary] uppercase tracking-widest border-b border-[--border] pb-3 flex items-center gap-2">
-              <ClipboardList size={14} className="text-[--accent]" />
-              <span>Field Status (Real-time)</span>
-            </h3>
-
-            {fieldStatuses.length === 0 ? (
-              <p className="text-[10px] text-[--text-muted] italic">No fields configured for this scope.</p>
-            ) : (
-              <div className="space-y-2.5 max-h-[200px] overflow-y-auto pr-1">
-                {fieldStatuses.map(f => (
-                  <div key={f.id} className="flex justify-between items-center bg-stone-50 border border-stone-200/50 p-2 rounded-lg text-[10px]">
-                    <div className="truncate pr-2">
-                      <span className="block font-bold text-[--text-primary] truncate">{f.name}</span>
-                      <span className="block text-[8px] text-[--text-muted] mt-0.5">{f.type}</span>
-                    </div>
-                    <span className={`px-2 py-0.5 rounded-full font-black uppercase text-[8px] shrink-0 ${
-                      f.isActive 
-                        ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' 
-                        : 'bg-stone-100 text-stone-500 border border-stone-200'
-                    }`}>
-                      {f.isActive ? 'Being Added' : 'Not Added'}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Real-time Employee Details Card */}
-          {selectedAgent && (
-            <div className="glass-panel p-5 bg-[--accent-light]/20 border border-[--accent-border]/30 shadow-sm space-y-4 animate-in fade-in duration-500">
-              <h3 className="text-[10px] font-black text-[--accent] uppercase tracking-widest flex items-center gap-2">
-                <User size={14} />
-                <span>Employee Details</span>
+            {/* Real-time Field Configuration Status Widget */}
+            <div className="glass-panel p-5 bg-white border border-[--border] shadow-sm space-y-4">
+              <h3 className="text-xs font-black text-[--text-primary] uppercase tracking-widest border-b border-[--border] pb-3 flex items-center gap-2">
+                <ClipboardList size={14} className="text-[--accent]" />
+                <span>Field Status (Real-time)</span>
               </h3>
-              
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-[--accent] text-white flex items-center justify-center font-black text-lg shadow-inner">
-                  {selectedAgent.name?.slice(0, 2).toUpperCase()}
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-[--text-primary] leading-none">{selectedAgent.name}</h4>
-                  <p className="text-[10px] text-[--text-muted] mt-1 font-medium">{selectedAgent.email}</p>
-                </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-2 pt-2">
-                <div className="bg-white/60 p-2 rounded-lg border border-[--accent-border]/20 text-center">
-                  <span className="block text-[8px] uppercase font-black text-[--text-muted]">Role</span>
-                  <span className="text-[10px] font-bold text-[--accent] uppercase">
-                    {(selectedAgent.role_name || selectedAgent.role || 'Agent').replace('_', ' ')}
-                  </span>
-                </div>
-                <div className="bg-white/60 p-2 rounded-lg border border-[--accent-border]/20 text-center">
-                  <span className="block text-[8px] uppercase font-black text-[--text-muted]">Status</span>
-                  <span className="text-[10px] font-bold text-emerald-600 uppercase flex items-center justify-center gap-1">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                    Active
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Right Column: Follow-up List & Details */}
-        <div className="xl:col-span-3 space-y-6">
-          
-          {/* Admin KPI Dashboard */}
-          {isAdmin && stats && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-in fade-in duration-300">
-              {/* Card 1: Total */}
-              <div className="glass-panel p-4 bg-indigo-50/20 border border-indigo-100 rounded-xl flex items-center gap-4">
-                <div className="w-10 h-10 rounded-lg bg-indigo-500 text-white flex items-center justify-center">
-                  <ClipboardList size={20} />
-                </div>
-                <div>
-                  <span className="block text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Total Visits</span>
-                  <span className="text-xl font-bold text-[--text-primary]">{stats.daily.total}</span>
-                  <span className="block text-[8px] text-[--text-muted] mt-0.5">All-time: {stats.allTime.total}</span>
-                </div>
-              </div>
-
-              {/* Card 2: Pending */}
-              <div className="glass-panel p-4 bg-amber-50/20 border border-amber-100 rounded-xl flex items-center gap-4">
-                <div className="w-10 h-10 rounded-lg bg-amber-500 text-white flex items-center justify-center">
-                  <Clock size={20} />
-                </div>
-                <div>
-                  <span className="block text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Pending</span>
-                  <span className="text-xl font-bold text-[--text-primary]">{stats.daily.pending}</span>
-                  <span className="block text-[8px] text-[--text-muted] mt-0.5">All-time: {stats.allTime.pending}</span>
-                </div>
-              </div>
-
-              {/* Card 3: Completed */}
-              <div className="glass-panel p-4 bg-emerald-50/20 border border-emerald-100 rounded-xl flex items-center gap-4">
-                <div className="w-10 h-10 rounded-lg bg-emerald-500 text-white flex items-center justify-center">
-                  <CheckCircle2 size={20} />
-                </div>
-                <div>
-                  <span className="block text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Completed</span>
-                  <span className="text-xl font-bold text-[--text-primary]">{stats.daily.completed}</span>
-                  <span className="block text-[8px] text-[--text-muted] mt-0.5">All-time: {stats.allTime.completed}</span>
-                </div>
-              </div>
-
-              {/* Card 4: Missed */}
-              <div className="glass-panel p-4 bg-rose-50/20 border border-rose-100 rounded-xl flex items-center gap-4">
-                <div className="w-10 h-10 rounded-lg bg-rose-500 text-white flex items-center justify-center">
-                  <X size={20} />
-                </div>
-                <div>
-                  <span className="block text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Missed</span>
-                  <span className="text-xl font-bold text-[--text-primary]">{stats.daily.missed}</span>
-                  <span className="block text-[8px] text-[--text-muted] mt-0.5">All-time: {stats.allTime.missed}</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="glass-panel bg-white border border-[--border] shadow-sm overflow-hidden flex flex-col min-h-[500px]">
-            {/* List Header */}
-            <div className="px-6 py-4 border-b border-[--border] bg-stone-50/50 flex justify-between items-center">
-              <h3 className="text-sm font-black text-[--text-primary] uppercase tracking-wide">
-                Visit Schedule for {new Date(dateStr).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
-              </h3>
-              <span className="text-[10px] font-black bg-white border border-[--border-strong] px-3 py-1 rounded-full text-[--text-secondary]">
-                {filteredFollowUps.length} Records Found
-              </span>
-            </div>
-
-            {/* Content Area */}
-            <div className="flex-1 overflow-y-auto">
-              {loading ? (
-                <div className="p-20 flex flex-col items-center justify-center gap-3">
-                  <div className="w-8 h-8 border-4 border-stone-100 border-t-[--accent] rounded-full animate-spin" />
-                  <span className="text-[10px] font-black uppercase text-[--text-muted] tracking-widest">Synchronizing...</span>
-                </div>
-              ) : filteredFollowUps.length === 0 ? (
-                <div className="p-20 text-center space-y-3 opacity-60">
-                  <ClipboardList size={64} className="mx-auto text-stone-200" />
-                  <p className="text-sm font-bold text-[--text-secondary]">No follow-ups scheduled for this criteria.</p>
-                  <p className="text-xs">Adjust your filters or select another date.</p>
-                </div>
+              {fieldStatuses.length === 0 ? (
+                <p className="text-[10px] text-[--text-muted] italic">No fields configured for this scope.</p>
               ) : (
-                <div className="divide-y divide-stone-100">
-                  {filteredFollowUps.map(item => (
-                    <FollowUpCard 
-                      key={item.id} 
-                      item={item} 
-                      onComplete={handleMarkCompleted}
-                      isAdmin={isAdmin}
-                    />
+                <div className="space-y-2.5 max-h-[200px] overflow-y-auto pr-1">
+                  {fieldStatuses.map(f => (
+                    <div key={f.id} className="flex justify-between items-center bg-stone-50 border border-stone-200/50 p-2 rounded-lg text-[10px]">
+                      <div className="truncate pr-2">
+                        <span className="block font-bold text-[--text-primary] truncate">{f.name}</span>
+                        <span className="block text-[8px] text-[--text-muted] mt-0.5">{f.type}</span>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-full font-black uppercase text-[8px] shrink-0 ${
+                        f.isActive 
+                          ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' 
+                          : 'bg-stone-100 text-stone-500 border border-stone-200'
+                      }`}>
+                        {f.isActive ? 'Being Added' : 'Not Added'}
+                      </span>
+                    </div>
                   ))}
                 </div>
               )}
             </div>
+
+            {/* Real-time Employee Details Card */}
+            {selectedAgent && (
+              <div className="glass-panel p-5 bg-[--accent-light]/20 border border-[--accent-border]/30 shadow-sm space-y-4 animate-in fade-in duration-500">
+                <h3 className="text-[10px] font-black text-[--accent] uppercase tracking-widest flex items-center gap-2">
+                  <User size={14} />
+                  <span>Employee Details</span>
+                </h3>
+                
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-[--accent] text-white flex items-center justify-center font-black text-lg shadow-inner">
+                    {selectedAgent.name?.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-[--text-primary] leading-none">{selectedAgent.name}</h4>
+                    <p className="text-[10px] text-[--text-muted] mt-1 font-medium">{selectedAgent.email}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-2">
+                  <div className="bg-white/60 p-2 rounded-lg border border-[--accent-border]/20 text-center">
+                    <span className="block text-[8px] uppercase font-black text-[--text-muted]">Role</span>
+                    <span className="text-[10px] font-bold text-[--accent] uppercase">
+                      {(selectedAgent.role_name || selectedAgent.role || 'Agent').replace('_', ' ')}
+                    </span>
+                  </div>
+                  <div className="bg-white/60 p-2 rounded-lg border border-[--accent-border]/20 text-center">
+                    <span className="block text-[8px] uppercase font-black text-[--text-muted]">Status</span>
+                    <span className="text-[10px] font-bold text-emerald-600 uppercase flex items-center justify-center gap-1">
+                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      Active
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right Column: Follow-up List & Details */}
+          <div className="xl:col-span-3 space-y-6">
+            
+            {/* Admin KPI Dashboard */}
+            {isAdmin && stats && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-in fade-in duration-300">
+                {/* Card 1: Total */}
+                <div className="glass-panel p-4 bg-indigo-50/20 border border-indigo-100 rounded-xl flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-lg bg-indigo-500 text-white flex items-center justify-center">
+                    <ClipboardList size={20} />
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Total Visits</span>
+                    <span className="text-xl font-bold text-[--text-primary]">{stats.daily.total}</span>
+                    <span className="block text-[8px] text-[--text-muted] mt-0.5">All-time: {stats.allTime.total}</span>
+                  </div>
+                </div>
+
+                {/* Card 2: Pending */}
+                <div className="glass-panel p-4 bg-amber-50/20 border border-amber-100 rounded-xl flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-lg bg-amber-500 text-white flex items-center justify-center">
+                    <Clock size={20} />
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Pending</span>
+                    <span className="text-xl font-bold text-[--text-primary]">{stats.daily.pending}</span>
+                    <span className="block text-[8px] text-[--text-muted] mt-0.5">All-time: {stats.allTime.pending}</span>
+                  </div>
+                </div>
+
+                {/* Card 3: Completed */}
+                <div className="glass-panel p-4 bg-emerald-50/20 border border-emerald-100 rounded-xl flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-lg bg-emerald-500 text-white flex items-center justify-center">
+                    <CheckCircle2 size={20} />
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Completed</span>
+                    <span className="text-xl font-bold text-[--text-primary]">{stats.daily.completed}</span>
+                    <span className="block text-[8px] text-[--text-muted] mt-0.5">All-time: {stats.allTime.completed}</span>
+                  </div>
+                </div>
+
+                {/* Card 4: Missed */}
+                <div className="glass-panel p-4 bg-rose-50/20 border border-rose-100 rounded-xl flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-lg bg-rose-500 text-white flex items-center justify-center">
+                    <X size={20} />
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Missed</span>
+                    <span className="text-xl font-bold text-[--text-primary]">{stats.daily.missed}</span>
+                    <span className="block text-[8px] text-[--text-muted] mt-0.5">All-time: {stats.allTime.missed}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="glass-panel bg-white border border-[--border] shadow-sm overflow-hidden flex flex-col min-h-[500px]">
+              {/* List Header */}
+              <div className="px-6 py-4 border-b border-[--border] bg-stone-50/50 flex justify-between items-center">
+                <h3 className="text-sm font-black text-[--text-primary] uppercase tracking-wide">
+                  Visit Schedule for {new Date(dateStr).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
+                </h3>
+                <span className="text-[10px] font-black bg-white border border-[--border-strong] px-3 py-1 rounded-full text-[--text-secondary]">
+                  {filteredFollowUps.length} Records Found
+                </span>
+              </div>
+
+              {/* Content Area */}
+              <div className="flex-1 overflow-y-auto">
+                {loading ? (
+                  <div className="p-20 flex flex-col items-center justify-center gap-3">
+                    <div className="w-8 h-8 border-4 border-stone-100 border-t-[--accent] rounded-full animate-spin" />
+                    <span className="text-[10px] font-black uppercase text-[--text-muted] tracking-widest">Synchronizing...</span>
+                  </div>
+                ) : filteredFollowUps.length === 0 ? (
+                  <div className="p-20 text-center space-y-3 opacity-60">
+                    <ClipboardList size={64} className="mx-auto text-stone-200" />
+                    <p className="text-sm font-bold text-[--text-secondary]">No follow-ups scheduled for this criteria.</p>
+                    <p className="text-xs">Adjust your filters or select another date.</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-stone-100">
+                    {filteredFollowUps.map(item => (
+                      <FollowUpCard 
+                        key={item.id} 
+                        item={item} 
+                        onComplete={handleMarkCompleted}
+                        isAdmin={isAdmin}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

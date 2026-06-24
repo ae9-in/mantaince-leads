@@ -32,6 +32,7 @@ import { useAuthStore } from '../store/authStore.js';
 import { useUiStore } from '../store/uiStore.js';
 import toast from 'react-hot-toast';
 import GeotagCapture from '../components/GeotagCapture.jsx';
+import VerticalSelectionBar from '../components/VerticalSelectionBar.jsx';
 
 const BASE_DYNAMIC_FIELDS = [
   { key: 'nameBusiness', label: 'Name Business', type: 'text', defaultValue: '' },
@@ -108,7 +109,20 @@ const TableRow = React.memo(({ row, selected }) => {
 });
 
 export const LeadsPage = () => {
-  const { activeVertical, activeSubVertical, leadsRefreshTrigger } = useUiStore();
+  const { activeVertical, setActiveVertical, activeSubVertical, setActiveSubVertical, leadsRefreshTrigger } = useUiStore();
+  const [verticals, setVerticals] = useState([]);
+
+  useEffect(() => {
+    const fetchVerticals = async () => {
+      try {
+        const res = await axios.get('/api/v1/verticals');
+        setVerticals(res.data.data || []);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchVerticals();
+  }, []);
   const { user } = useAuthStore();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -301,47 +315,34 @@ export const LeadsPage = () => {
     fetchMetadata();
   }, [activeVertical, isAdmin]);
 
-  // Prefetch fallback active agents once
+  // Fetch agents scoped to the active vertical, filtered by sub-vertical when one is selected
   useEffect(() => {
     let cancelled = false;
-    const fetchAllAgents = async () => {
-      if (isAdmin && activeVertical) {
-        try {
-          const res = await axios.get('/api/v1/users');
-          if (!cancelled) {
-            setAllAgents((res.data.data || []).filter((member) => member.is_active));
-          }
-        } catch (err) {
-          console.error('Error fetching fallback agents:', err);
-        }
-      }
-    };
-    fetchAllAgents();
-    return () => { cancelled = true; };
-  }, [isAdmin, activeVertical]);
-
-  useEffect(() => {
-    const fetchSubVerticalAgents = async () => {
+    const fetchAgents = async () => {
+      if (!activeVertical) return;
       const subId = leadFormSubVerticalId || subVerticalFilter;
-      if (subId) {
-        try {
-          const res = await axios.get(`/api/v1/admin/sub-verticals/${subId}/users`);
-          setAgents(res.data.data || []);
-        } catch (err) {
-          console.error('Error fetching sub-vertical agents:', err);
-          setAgents([]);
-        }
-      } else {
-        if (isAdmin) {
-          setAgents(allAgents);
+      try {
+        let url;
+        if (subId) {
+          // Sub-vertical selected — fetch assigned agents + admins for that sub-vertical
+          url = `/api/v1/admin/sub-verticals/${subId}/users`;
         } else {
-          setAgents([]);
+          // No sub-vertical — fetch all active users for the vertical
+          url = `/api/v1/users?vertical=${activeVertical._id}&active=true`;
         }
+        const res = await axios.get(url);
+        if (!cancelled) {
+          setAgents((res.data.data || []).filter(u => u.is_active !== false));
+          setAllAgents((res.data.data || []).filter(u => u.is_active !== false));
+        }
+      } catch (err) {
+        console.error('Error fetching agents:', err);
+        if (!cancelled) setAgents([]);
       }
     };
-
-    fetchSubVerticalAgents();
-  }, [leadFormSubVerticalId, subVerticalFilter, isAdmin, allAgents]);
+    fetchAgents();
+    return () => { cancelled = true; };
+  }, [activeVertical, leadFormSubVerticalId, subVerticalFilter]);
 
   useEffect(() => {
     fetchLeads();
@@ -893,14 +894,36 @@ export const LeadsPage = () => {
   // If no vertical is active, show landing dashboard
   if (!activeVertical) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-8 space-y-6">
-        <div className="relative w-24 h-24 flex items-center justify-center bg-[--accent-light] border border-[--accent-border] rounded-2xl shadow-md">
-          <FileSpreadsheet className="text-[--accent]" size={44} />
+      <div className="space-y-6">
+        <div className="flex justify-between items-center border-b border-[--border] pb-4">
+          <div>
+            <h1 className="text-2xl font-black text-[--text-primary] uppercase tracking-wider">COS</h1>
+            <p className="text-xs text-[--text-secondary] mt-1">Select a vertical to view client records</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/follow-ups-positives')}
+            className="inline-flex items-center gap-2 px-4 py-2 border border-emerald-300 hover:border-emerald-500 text-emerald-600 bg-white rounded-lg font-bold text-sm hover:bg-stone-50 shadow-sm transition-all"
+          >
+            <span>Positives & Follow-ups →</span>
+          </button>
         </div>
-        <div className="max-w-md space-y-2">
-          <h2 className="text-2xl font-black text-[--text-primary] uppercase tracking-wider">Leads Workspace</h2>
-          <p className="text-sm text-[--text-secondary] leading-relaxed">
-            Welcome to the LeadsBase portal. Please select a vertical from the sidebar to manage leads.
+
+        <VerticalSelectionBar
+          verticals={verticals}
+          activeVerticalId={null}
+          onSelect={(v) => {
+            setActiveVertical(v);
+            setActiveSubVertical(null);
+            navigate(`/leads?verticalId=${v._id}`);
+          }}
+        />
+
+        <div className="glass-panel border border-[--border] bg-white p-12 text-center text-xs text-[--text-secondary] flex items-center justify-center flex-col gap-2 shadow-sm min-h-[300px]">
+          <FileSpreadsheet size={44} className="text-[--text-muted]/30 animate-pulse" />
+          <h3 className="font-bold text-sm text-[--text-primary] mt-2">No Active Business Vertical</h3>
+          <p className="max-w-xs leading-relaxed">
+            Please select a business vertical from the selector above to view and manage cause & conversion records.
           </p>
         </div>
       </div>
@@ -910,21 +933,28 @@ export const LeadsPage = () => {
   const activeSubVerticalName = activeSubVertical?.name || subVerticals.find(s => s._id === subVerticalFilter)?.name;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-in fade-in duration-300">
       {/* Workspace Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[--text-primary]">
-            {activeSubVerticalName ? `${activeSubVerticalName} Workspace` : `${activeVertical.name} Workspace`}
+            {activeSubVerticalName ? `${activeSubVerticalName} – COS` : `${activeVertical.name} – COS`}
           </h1>
           <p className="text-sm text-[--text-secondary] mt-1">
             {activeSubVerticalName 
-              ? `Manage leads for ${activeSubVerticalName} under ${activeVertical?.name || 'Workspace'}.`
-              : `Manage leads for ${activeVertical.name}.`}
+              ? `Manage cause/conversions for ${activeSubVerticalName} under ${activeVertical?.name || 'Workspace'}.`
+              : `Manage cause/conversions for ${activeVertical.name}.`}
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2 animate-none">
+          <button
+            type="button"
+            onClick={() => navigate('/follow-ups-positives')}
+            className="inline-flex items-center gap-2 px-4 py-2 border border-emerald-300 hover:border-emerald-500 text-emerald-600 bg-white rounded-lg font-bold text-sm hover:bg-stone-50 shadow-sm transition-all"
+          >
+            <span>Positives & Follow-ups →</span>
+          </button>
           <button
             type="button"
             onClick={() => setShowFilters((prev) => !prev)}
@@ -956,22 +986,24 @@ export const LeadsPage = () => {
           </button>
           <button
             type="button"
-            onClick={() => navigate('/calendar')}
-            className="inline-flex items-center gap-2 px-4 py-2 border border-[--accent-border] hover:border-[--accent] text-[--accent] bg-white rounded-lg font-bold text-sm hover:bg-stone-50 shadow-sm transition-all animate-none"
-          >
-            <Calendar size={16} />
-            <span>Follow-up Leads</span>
-          </button>
-          <button
-            type="button"
             onClick={handleOpenAdd}
             className="inline-flex items-center gap-2 px-4 py-2 bg-[--accent] text-white rounded-lg font-bold text-sm hover:bg-[--accent-hover] shadow-sm transition-all"
           >
             <Plus size={16} />
-            <span>Add Lead</span>
+            <span>Add Lead (COS)</span>
           </button>
         </div>
       </div>
+
+      <VerticalSelectionBar
+        verticals={verticals}
+        activeVerticalId={activeVertical._id}
+        onSelect={(v) => {
+          setActiveVertical(v);
+          setActiveSubVertical(null);
+          navigate(`/leads?verticalId=${v._id}`);
+        }}
+      />
 
       {csvBatchId && (
         <div className="flex items-center justify-between p-3 bg-[--accent-light] border border-[--accent-border] rounded-lg text-sm text-[--accent] mb-4">
@@ -1340,13 +1372,13 @@ export const LeadsPage = () => {
       )}
 
       {leadModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-stone-900/40 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="glass-panel w-full max-w-5xl p-6 bg-white border border-[--border] text-[--text-primary] my-6 shadow-xl">
-            <div className="flex items-start justify-between gap-4 mb-5">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 backdrop-blur-sm p-4">
+          <div className="glass-panel w-full max-w-5xl p-6 bg-white border border-[--border] text-[--text-primary] shadow-xl flex flex-col max-h-[90vh]">
+            <div className="flex items-start justify-between gap-4 mb-5 flex-shrink-0">
               <div>
-                <h2 className="text-xl font-bold text-[--text-primary]">{selectedLead ? 'Edit Lead' : 'Create Lead'}</h2>
+                <h2 className="text-xl font-bold text-[--text-primary]">{selectedLead ? 'Edit COS' : 'Create COS'}</h2>
                 <p className="text-xs text-[--text-secondary] mt-1">
-                  Base lead fields stay at the top. Custom fields stay below so the panel stays clean.
+                  Base COS fields stay at the top. Custom fields stay below so the panel stays clean.
                 </p>
               </div>
               <button type="button" onClick={() => setLeadModalOpen(false)} className="px-3 py-1.5 border border-[--border-strong] hover:bg-stone-50 rounded-lg text-xs font-semibold text-[--text-secondary]">
@@ -1355,119 +1387,121 @@ export const LeadsPage = () => {
             </div>
 
             {formErrors.length > 0 && (
-              <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2 rounded-lg mb-4">
+              <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2 rounded-lg mb-4 flex-shrink-0">
                 <AlertCircle size={14} />
                 <span>{formErrors[0]}</span>
               </div>
             )}
 
-            <form onSubmit={handleLeadSubmit} className="space-y-6">
-              <FormSection title="Lead Fields">
-                <FormField label="Name *">
-                  <input required value={leadFormName} onChange={(event) => setLeadFormName(event.target.value)} />
-                </FormField>
-                <FormField label="Number *">
-                  <input required value={leadFormPhone} onChange={(event) => setLeadFormPhone(event.target.value)} />
-                </FormField>
-                <FormField label="Business">
-                  <input value={leadFormBusiness} onChange={(event) => setLeadFormBusiness(event.target.value)} />
-                </FormField>
-                {!subVerticalFilter && (
-                  <FormField label="Sub-Vertical">
+            <form onSubmit={handleLeadSubmit} className="flex flex-col flex-1 overflow-hidden min-h-0">
+              <div className="flex-1 overflow-y-auto pr-3 space-y-6 min-h-0 py-1">
+                <FormSection title="Lead Fields">
+                  <FormField label="Name *">
+                    <input required value={leadFormName} onChange={(event) => setLeadFormName(event.target.value)} />
+                  </FormField>
+                  <FormField label="Number *">
+                    <input required value={leadFormPhone} onChange={(event) => setLeadFormPhone(event.target.value)} />
+                  </FormField>
+                  <FormField label="Business">
+                    <input value={leadFormBusiness} onChange={(event) => setLeadFormBusiness(event.target.value)} />
+                  </FormField>
+                  {!subVerticalFilter && (
+                    <FormField label="Sub-Vertical">
+                      <select
+                        value={leadFormSubVerticalId || ''}
+                        onChange={(event) => setLeadFormSubVerticalId(event.target.value)}
+                      >
+                        <option value="">-- None (Vertical Level) --</option>
+                        {subVerticals.map((sub) => (
+                          <option key={sub._id} value={sub._id}>{sub.name}</option>
+                        ))}
+                      </select>
+                    </FormField>
+                  )}
+
+                  <FormField label="Employee Spoken">
                     <select
-                      value={leadFormSubVerticalId || ''}
-                      onChange={(event) => setLeadFormSubVerticalId(event.target.value)}
+                      value={leadFormAssignedTo}
+                      onChange={(event) => setLeadFormAssignedTo(event.target.value)}
                     >
-                      <option value="">-- None (Vertical Level) --</option>
-                      {subVerticals.map((sub) => (
-                        <option key={sub._id} value={sub._id}>{sub.name}</option>
+                      <option value="">-- Unassigned --</option>
+                      {agents.map((agent) => (
+                        <option key={agent.id} value={agent.id}>{agent.name} ({agent.email})</option>
                       ))}
                     </select>
                   </FormField>
-                )}
 
-                <FormField label="Employee Spoken">
-                  <select
-                    value={leadFormAssignedTo}
-                    onChange={(event) => setLeadFormAssignedTo(event.target.value)}
-                  >
-                    <option value="">-- Unassigned --</option>
-                    {agents.map((agent) => (
-                      <option key={agent.id} value={agent.id}>{agent.name} ({agent.email})</option>
-                    ))}
-                  </select>
-                </FormField>
-
-                <FormField label="Lead Type">
-                  <select
-                    value={leadFormLeadType}
-                    onChange={(event) => {
-                      setLeadFormLeadType(event.target.value);
-                      if (event.target.value !== 'FIELD') {
-                        setLeadFormGeotagCoords(null);
-                        setLeadFormGeotagFile(null);
-                      }
-                    }}
-                  >
-                    <option value="CALL">Calls</option>
-                    <option value="FIELD">Field Visit</option>
-                  </select>
-                </FormField>
-
-                <FormField label="Status">
-                  <select
-                    value={leadFormStatus}
-                    onChange={(event) => setLeadFormStatus(event.target.value)}
-                  >
-                    {STATUS_OPTIONS.map((status) => (
-                      <option key={status.value} value={status.value}>{status.label}</option>
-                    ))}
-                  </select>
-                </FormField>
-
-                {leadFormLeadType === 'FIELD' && (
-                  <div className="col-span-1 md:col-span-2 xl:col-span-3">
-                    <GeotagCapture
-                      leadType="FIELD_VISIT"
-                      onChange={(coords, file) => {
-                        if (coords) setLeadFormGeotagCoords(coords);
-                        if (file) setLeadFormGeotagFile(file);
+                  <FormField label="Lead Type">
+                    <select
+                      value={leadFormLeadType}
+                      onChange={(event) => {
+                        setLeadFormLeadType(event.target.value);
+                        if (event.target.value !== 'FIELD') {
+                          setLeadFormGeotagCoords(null);
+                          setLeadFormGeotagFile(null);
+                        }
                       }}
-                    />
-                  </div>
-                )}
-
-                {BASE_DYNAMIC_FIELDS.map((field) => (
-                  <FormField key={field.key} label={field.label}>
-                    <input
-                      type={field.type === 'date' ? 'date' : field.type === 'url' ? 'url' : 'text'}
-                      value={getDynamicValue(leadFormDynamic, field.key)}
-                      onChange={(event) => handleDynamicChange(field.key, event.target.value)}
-                    />
+                    >
+                      <option value="CALL">Calls</option>
+                      <option value="FIELD">Field Visit</option>
+                    </select>
                   </FormField>
-                ))}
-              </FormSection>
 
-              {customConfigs.length > 0 && (
-                <FormSection title="Custom Fields">
-                  {customConfigs.map((config) => (
-                    <FormField key={config._id} label={`${config.label}${config.isRequired ? ' *' : ''}`}>
-                      <CustomFieldInput
-                        config={config}
-                        value={getDynamicValue(leadFormDynamic, config.fieldKey) || undefined}
-                        onChange={(value) => handleDynamicChange(config.fieldKey, value)}
+                  <FormField label="Status">
+                    <select
+                      value={leadFormStatus}
+                      onChange={(event) => setLeadFormStatus(event.target.value)}
+                    >
+                      {STATUS_OPTIONS.map((status) => (
+                        <option key={status.value} value={status.value}>{status.label}</option>
+                      ))}
+                    </select>
+                  </FormField>
+
+                  {leadFormLeadType === 'FIELD' && (
+                    <div className="col-span-1 md:col-span-2 xl:col-span-3">
+                      <GeotagCapture
+                        leadType="FIELD_VISIT"
+                        onChange={(coords, file) => {
+                          if (coords) setLeadFormGeotagCoords(coords);
+                          if (file) setLeadFormGeotagFile(file);
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {BASE_DYNAMIC_FIELDS.map((field) => (
+                    <FormField key={field.key} label={field.label}>
+                      <input
+                        type={field.type === 'date' ? 'date' : field.type === 'url' ? 'url' : 'text'}
+                        value={getDynamicValue(leadFormDynamic, field.key)}
+                        onChange={(event) => handleDynamicChange(field.key, event.target.value)}
                       />
                     </FormField>
                   ))}
                 </FormSection>
-              )}
 
-              <div className="flex justify-end gap-3 border-t border-[--border-strong] pt-4">
+                {customConfigs.length > 0 && (
+                  <FormSection title="Custom Fields">
+                    {customConfigs.map((config) => (
+                      <FormField key={config._id} label={`${config.label}${config.isRequired ? ' *' : ''}`}>
+                        <CustomFieldInput
+                          config={config}
+                          value={getDynamicValue(leadFormDynamic, config.fieldKey) || undefined}
+                          onChange={(value) => handleDynamicChange(config.fieldKey, value)}
+                        />
+                      </FormField>
+                    ))}
+                  </FormSection>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3 border-t border-[--border-strong] pt-4 mt-4 flex-shrink-0">
                 <button type="button" onClick={() => setLeadModalOpen(false)} className="px-4 py-2 border border-[--border-strong] hover:bg-stone-50 rounded-lg text-sm font-semibold text-[--text-secondary]">
                   Cancel
                 </button>
                 <button type="submit" className="px-4 py-2 bg-[--accent] text-white font-bold rounded-lg text-sm hover:bg-[--accent-hover] shadow-sm">
-                  Save Lead
+                  Save Lead (COS)
                 </button>
               </div>
             </form>
@@ -1477,8 +1511,8 @@ export const LeadsPage = () => {
 
       <ConfirmDialog
         isOpen={bulkDeleteDialog}
-        title="Bulk Delete Leads"
-        description={`Are you sure you want to delete these ${selectedRowIds.length} checked leads?`}
+        title="Bulk Delete COS"
+        description={`Are you sure you want to delete these ${selectedRowIds.length} checked COS records?`}
         confirmLabel="Bulk Delete"
         danger
         onConfirm={handleBulkDelete}

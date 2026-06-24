@@ -8,13 +8,34 @@ export const getUsersBySubVertical = async (req, res) => {
   const { subVerticalId } = req.params;
   try {
     const result = await query(`
-      SELECT DISTINCT u.id, u.name, u.email, r.name as role 
-      FROM users u 
-      JOIN roles r ON u.role_id = r.id 
-      JOIN user_assignments ua ON u.id = ua.user_id 
-      WHERE ua.sub_vertical_id = $1 AND ua.is_active = true AND u.is_active = true
+      SELECT DISTINCT u.id, u.name, u.email, r.name as role
+      FROM users u
+      JOIN roles r ON u.role_id = r.id
+      WHERE u.is_active = true
+        AND (
+          -- Users explicitly assigned to this sub-vertical
+          EXISTS (
+            SELECT 1 FROM user_assignments ua
+            WHERE ua.user_id = u.id
+              AND ua.sub_vertical_id = $1
+              AND ua.is_active = true
+          )
+          OR
+          -- Super admins always appear
+          r.name = 'super_admin'
+          OR
+          -- Vertical admins who have access to the parent vertical
+          (
+            r.name = 'vertical_admin'
+            AND $1::uuid IN (
+              SELECT sv2.id FROM sub_verticals sv2
+              WHERE sv2.vertical_id = ANY(u.vertical_access)
+            )
+          )
+        )
+      ORDER BY u.name ASC
     `, [subVerticalId]);
-    
+
     return res.status(200).json({ success: true, data: result.rows });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
@@ -93,7 +114,7 @@ export const createCustomField = async (req, res) => {
     const subRes = await query('SELECT vertical_id FROM sub_verticals WHERE id = $1', [subVerticalId]);
     const verticalId = subRes.rows[0]?.vertical_id;
     if (verticalId) {
-      broadcastToAll({ type: 'LEAD_MUTATED', verticalId, action: 'custom_field_create' });
+      broadcastToAll({ type: 'COST_CONVERSION_MUTATED', verticalId, action: 'custom_field_create' });
     }
 
     return res.status(201).json({ success: true, data: newField });
@@ -167,7 +188,7 @@ export const updateCustomField = async (req, res) => {
     const subRes = await query('SELECT vertical_id FROM sub_verticals WHERE id = $1', [field.sub_vertical_id]);
     const verticalId = subRes.rows[0]?.vertical_id;
     if (verticalId) {
-      broadcastToAll({ type: 'LEAD_MUTATED', verticalId, action: 'custom_field_update' });
+      broadcastToAll({ type: 'COST_CONVERSION_MUTATED', verticalId, action: 'custom_field_update' });
     }
 
     return res.status(200).json({ success: true, data: updated });
@@ -188,7 +209,7 @@ export const deleteCustomField = async (req, res) => {
     // Soft delete custom field and delete custom field values in parallel
     await Promise.all([
       query('UPDATE custom_fields SET is_deleted = true WHERE id = $1', [id]),
-      query('DELETE FROM lead_custom_values WHERE custom_field_id = $1', [id])
+      query('DELETE FROM cost_conversion_custom_values WHERE custom_field_id = $1', [id])
     ]);
 
     await logAudit(req, {
@@ -201,7 +222,7 @@ export const deleteCustomField = async (req, res) => {
     const subRes = await query('SELECT vertical_id FROM sub_verticals WHERE id = $1', [field.sub_vertical_id]);
     const verticalId = subRes.rows[0]?.vertical_id;
     if (verticalId) {
-      broadcastToAll({ type: 'LEAD_MUTATED', verticalId, action: 'custom_field_delete' });
+      broadcastToAll({ type: 'COST_CONVERSION_MUTATED', verticalId, action: 'custom_field_delete' });
     }
 
     return res.status(200).json({ success: true });
@@ -237,7 +258,7 @@ export const reorderCustomFields = async (req, res) => {
     const subRes = await query('SELECT vertical_id FROM sub_verticals WHERE id = $1', [subVerticalId]);
     const verticalId = subRes.rows[0]?.vertical_id;
     if (verticalId) {
-      broadcastToAll({ type: 'LEAD_MUTATED', verticalId, action: 'custom_field_reorder' });
+      broadcastToAll({ type: 'COST_CONVERSION_MUTATED', verticalId, action: 'custom_field_reorder' });
     }
 
     await logAudit(req, {
@@ -374,7 +395,7 @@ export const getSubVerticalStages = async (req, res) => {
       }
     }
     const result = await query(`
-      SELECT * FROM lead_stages 
+      SELECT * FROM cost_conversion_stages 
       WHERE sub_vertical_id = $1 
       ORDER BY display_order ASC
     `, [subVerticalId]);
@@ -395,14 +416,14 @@ export const createSubVerticalStage = async (req, res) => {
   try {
     const orderRes = await query(`
       SELECT COALESCE(MAX(display_order), -1) + 1 as next_order 
-      FROM lead_stages 
+      FROM cost_conversion_stages 
       WHERE sub_vertical_id = $1
     `, [subVerticalId]);
     const nextOrder = orderRes.rows[0].next_order;
 
     const id = crypto.randomUUID();
     const insertRes = await query(`
-      INSERT INTO lead_stages (id, sub_vertical_id, name, display_order)
+      INSERT INTO cost_conversion_stages (id, sub_vertical_id, name, display_order)
       VALUES ($1, $2, $3, $4)
       RETURNING *
     `, [id, subVerticalId, name, nextOrder]);
@@ -411,7 +432,7 @@ export const createSubVerticalStage = async (req, res) => {
 
     await logAudit(req, {
       action: 'STAGE_CREATED',
-      targetCollection: 'lead_stages',
+      targetCollection: 'cost_conversion_stages',
       targetId: newStage.id,
       after: newStage
     });
@@ -431,7 +452,7 @@ export const updateSubVerticalStage = async (req, res) => {
   }
 
   try {
-    const stageRes = await query('SELECT * FROM lead_stages WHERE id = $1', [id]);
+    const stageRes = await query('SELECT * FROM cost_conversion_stages WHERE id = $1', [id]);
     const stage = stageRes.rows[0];
     if (!stage) {
       return res.status(404).json({ success: false, error: 'Stage not found' });
@@ -439,7 +460,7 @@ export const updateSubVerticalStage = async (req, res) => {
 
     const before = { ...stage };
     const updateRes = await query(`
-      UPDATE lead_stages 
+      UPDATE cost_conversion_stages 
       SET name = $1, updated_at = NOW() 
       WHERE id = $2 
       RETURNING *
@@ -449,7 +470,7 @@ export const updateSubVerticalStage = async (req, res) => {
 
     await logAudit(req, {
       action: 'STAGE_UPDATED',
-      targetCollection: 'lead_stages',
+      targetCollection: 'cost_conversion_stages',
       targetId: id,
       before,
       after: updated
@@ -464,21 +485,21 @@ export const updateSubVerticalStage = async (req, res) => {
 export const deleteSubVerticalStage = async (req, res) => {
   const { id } = req.params;
   try {
-    const stageRes = await query('SELECT * FROM lead_stages WHERE id = $1', [id]);
+    const stageRes = await query('SELECT * FROM cost_conversion_stages WHERE id = $1', [id]);
     const stage = stageRes.rows[0];
     if (!stage) {
       return res.status(404).json({ success: false, error: 'Stage not found' });
     }
 
-    // Dissociate leads referencing this stage and delete the stage in parallel
+    // Dissociate cost conversions referencing this stage and delete the stage in parallel
     await Promise.all([
-      query('UPDATE leads SET stage_id = NULL WHERE stage_id = $1', [id]),
-      query('DELETE FROM lead_stages WHERE id = $1', [id])
+      query('UPDATE cost_conversions SET stage_id = NULL WHERE stage_id = $1', [id]),
+      query('DELETE FROM cost_conversion_stages WHERE id = $1', [id])
     ]);
 
     await logAudit(req, {
       action: 'STAGE_DELETED',
-      targetCollection: 'lead_stages',
+      targetCollection: 'cost_conversion_stages',
       targetId: id,
       before: stage
     });
@@ -500,7 +521,7 @@ export const reorderSubVerticalStages = async (req, res) => {
   try {
     const updatePromises = orderedIds.map((id, index) => 
       query(`
-        UPDATE lead_stages 
+        UPDATE cost_conversion_stages 
         SET display_order = $1, updated_at = NOW() 
         WHERE id = $2 AND sub_vertical_id = $3
       `, [index, id, subVerticalId])
@@ -508,14 +529,14 @@ export const reorderSubVerticalStages = async (req, res) => {
     await Promise.all(updatePromises);
 
     const listRes = await query(`
-      SELECT * FROM lead_stages 
+      SELECT * FROM cost_conversion_stages 
       WHERE sub_vertical_id = $1 
       ORDER BY display_order ASC
     `, [subVerticalId]);
 
     await logAudit(req, {
       action: 'STAGE_REORDERED',
-      targetCollection: 'lead_stages',
+      targetCollection: 'cost_conversion_stages',
       targetId: subVerticalId,
       after: listRes.rows
     });
@@ -526,55 +547,70 @@ export const reorderSubVerticalStages = async (req, res) => {
   }
 };
 
+// ── 6. Dashboard Stats using Materialized Views ──
 export const getAdminDashboardStats = async (req, res) => {
   try {
-    const [vertsRes, subsRes, leadsRes] = await Promise.all([
+    const [vertsRes, subsRes, mvStatsRes, subStatsRes] = await Promise.all([
       query('SELECT id, name, slug, color, is_active FROM verticals ORDER BY name'),
       query('SELECT id, vertical_id, name, slug, is_active FROM sub_verticals ORDER BY name'),
+      query('SELECT * FROM mv_vertical_stats'),
       query(`
         SELECT 
-          vertical_id, 
           sub_vertical_id, 
           status, 
           COUNT(*)::int AS count 
-        FROM leads 
-        WHERE is_deleted = false 
-        GROUP BY vertical_id, sub_vertical_id, status
+        FROM cost_conversions 
+        WHERE is_deleted = false AND sub_vertical_id IS NOT NULL
+        GROUP BY sub_vertical_id, status
       `)
     ]);
 
     const verticals = vertsRes.rows;
     const subVerticals = subsRes.rows;
-    const leadStats = leadsRes.rows;
+    const mvStats = mvStatsRes.rows;
+    const subStats = subStatsRes.rows;
 
     const accessibleVerticals = req.user.role === 'super_admin'
       ? verticals
       : verticals.filter(v => req.user.verticalAccess && req.user.verticalAccess.includes(v.id));
 
-    const statsMap = {};
-    leadStats.forEach(stat => {
-      const vId = stat.vertical_id;
-      const svId = stat.sub_vertical_id || 'vertical_level';
+    // Map vertical stats from mvStats
+    const vertStatsMap = {};
+    mvStats.forEach(row => {
+      vertStatsMap[row.vertical_id] = {
+        total: parseInt(row.total_cost_conversions || 0, 10),
+        new: parseInt(row.new_count || 0, 10),
+        won: parseInt(row.won_count || 0, 10),
+        contacted: parseInt(row.contacted_count || 0, 10),
+        byStatus: {
+          new: parseInt(row.new_count || 0, 10),
+          won: parseInt(row.won_count || 0, 10),
+          contacted: parseInt(row.contacted_count || 0, 10),
+        }
+      };
+    });
+
+    // Map sub-vertical stats from subStats query
+    const subStatsMap = {};
+    subStats.forEach(stat => {
+      const svId = stat.sub_vertical_id;
       const status = stat.status;
       const count = stat.count;
 
-      if (!statsMap[vId]) statsMap[vId] = { total: 0, converted: 0, byStatus: {}, subs: {} };
-      statsMap[vId].total += count;
-      if (status === 'converted') statsMap[vId].converted += count;
-      statsMap[vId].byStatus[status] = (statsMap[vId].byStatus[status] || 0) + count;
-
-      if (svId !== 'vertical_level') {
-        if (!statsMap[vId].subs[svId]) statsMap[vId].subs[svId] = { total: 0, converted: 0, byStatus: {} };
-        statsMap[vId].subs[svId].total += count;
-        if (status === 'converted') statsMap[vId].subs[svId].converted += count;
-        statsMap[vId].subs[svId].byStatus[status] = (statsMap[vId].subs[svId].byStatus[status] || 0) + count;
+      if (!subStatsMap[svId]) {
+        subStatsMap[svId] = { total: 0, converted: 0, byStatus: {} };
       }
+      subStatsMap[svId].total += count;
+      if (status === 'won' || status === 'WON' || status === 'converted') {
+        subStatsMap[svId].converted += count;
+      }
+      subStatsMap[svId].byStatus[status] = count;
     });
 
     const result = accessibleVerticals.map(v => {
-      const vStats = statsMap[v.id] || { total: 0, converted: 0, byStatus: {}, subs: {} };
+      const vMvStats = vertStatsMap[v.id] || { total: 0, new: 0, won: 0, contacted: 0, byStatus: {} };
       const vSubs = subVerticals.filter(sv => sv.vertical_id === v.id).map(sv => {
-        const svStats = vStats.subs[sv.id] || { total: 0, converted: 0, byStatus: {} };
+        const svStats = subStatsMap[sv.id] || { total: 0, converted: 0, byStatus: {} };
         return {
           id: sv.id,
           name: sv.name,
@@ -593,15 +629,81 @@ export const getAdminDashboardStats = async (req, res) => {
         slug: v.slug,
         color: v.color,
         isActive: v.is_active,
-        totalLeads: vStats.total,
-        convertedLeads: vStats.converted,
-        conversionRate: vStats.total > 0 ? parseFloat(((vStats.converted / vStats.total) * 100).toFixed(2)) : 0,
-        statusDistribution: vStats.byStatus,
+        totalLeads: vMvStats.total,
+        convertedLeads: vMvStats.won,
+        conversionRate: vMvStats.total > 0 ? parseFloat(((vMvStats.won / vMvStats.total) * 100).toFixed(2)) : 0,
+        statusDistribution: vMvStats.byStatus,
         subVerticals: vSubs
       };
     });
 
     return res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ── 7. Seed Custom Fields Template ──
+export const applyTemplateCustomFields = async (req, res) => {
+  const { subVerticalId } = req.params;
+  const { template } = req.body;
+
+  if (template !== 'excel_standard_v1') {
+    return res.status(400).json({ success: false, error: 'Unsupported template type' });
+  }
+
+  const TEMPLATE_FIELDS = [
+    { label: 'Business Type',                fieldKey: 'business_type',     fieldType: 'TEXT',     isRequired: false, order: 1 },
+    { label: 'Area',                          fieldKey: 'area',              fieldType: 'TEXT',     isRequired: false, order: 2 },
+    { label: 'City',                          fieldKey: 'city',              fieldType: 'TEXT',     isRequired: false, order: 3 },
+    { label: 'Point of Contact',              fieldKey: 'point_of_contact',  fieldType: 'TEXT',     isRequired: false, order: 4 },
+    { label: 'Remarks',                       fieldKey: 'remarks',           fieldType: 'TEXTAREA', isRequired: false, order: 5 },
+    { label: 'Call Recording Link',           fieldKey: 'recording_link',    fieldType: 'URL',      isRequired: false, order: 6 },
+    { label: 'Requirement',                   fieldKey: 'requirement',       fieldType: 'TEXTAREA', isRequired: false, order: 7 },
+    { label: 'Notes to Cost/Conversion Team', fieldKey: 'notes_to_cos_team', fieldType: 'TEXTAREA', isRequired: false, order: 8 },
+  ];
+
+  try {
+    let created = 0;
+    let skipped = 0;
+
+    for (const field of TEMPLATE_FIELDS) {
+      // Check if duplicate exists
+      const existsRes = await query(`
+        SELECT id FROM custom_fields 
+        WHERE sub_vertical_id = $1 AND field_key = $2 AND is_deleted = false
+      `, [subVerticalId, field.fieldKey]);
+
+      if (existsRes.rows.length > 0) {
+        skipped++;
+        continue;
+      }
+
+      const id = crypto.randomUUID();
+      await query(`
+        INSERT INTO custom_fields (id, sub_vertical_id, label, field_key, field_type, is_required, placeholder, options, "order")
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `, [
+        id, subVerticalId, field.label, field.fieldKey, field.fieldType,
+        field.isRequired, '', [], field.order
+      ]);
+      created++;
+    }
+
+    const subRes = await query('SELECT vertical_id FROM sub_verticals WHERE id = $1', [subVerticalId]);
+    const verticalId = subRes.rows[0]?.vertical_id;
+    if (verticalId) {
+      broadcastToAll({ type: 'COST_CONVERSION_MUTATED', verticalId, action: 'custom_field_apply_template' });
+    }
+
+    await logAudit(req, {
+      action: 'CUSTOM_FIELDS_TEMPLATE_APPLIED',
+      targetCollection: 'custom_fields',
+      targetId: subVerticalId,
+      after: { template, created, skipped }
+    });
+
+    return res.status(200).json({ success: true, data: { fieldsCreated: created, fieldsSkipped: skipped } });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }

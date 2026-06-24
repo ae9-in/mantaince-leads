@@ -18,10 +18,15 @@ const router = express.Router();
 router.use(authenticate);
 router.use(attachRole);
 
-// Follow-ups CRUD scoped to a specific lead
-router.get('/leads/:leadId/follow-ups', checkPermission(['leads:read', 'leads:read_own']), getFollowUps);
-router.post('/leads/:leadId/follow-ups', checkPermission(['leads:update', 'leads:update_own']), createFollowUp);
-router.get('/leads/:leadId/follow-ups/summary', checkPermission(['leads:read', 'leads:read_own']), getFollowUpSummary);
+// Follow-ups CRUD scoped to a specific cost conversion
+router.get('/cost-conversions/:costConversionId/follow-ups', checkPermission(['leads:read', 'leads:read_own']), getFollowUps);
+router.post('/cost-conversions/:costConversionId/follow-ups', checkPermission(['leads:update', 'leads:update_own']), createFollowUp);
+router.get('/cost-conversions/:costConversionId/follow-ups/summary', checkPermission(['leads:read', 'leads:read_own']), getFollowUpSummary);
+
+// Backward-compatibility aliases: /leads/:id/follow-ups → same handlers
+router.get('/leads/:costConversionId/follow-ups', checkPermission(['leads:read', 'leads:read_own']), getFollowUps);
+router.post('/leads/:costConversionId/follow-ups', checkPermission(['leads:update', 'leads:update_own']), createFollowUp);
+router.get('/leads/:costConversionId/follow-ups/summary', checkPermission(['leads:read', 'leads:read_own']), getFollowUpSummary);
 
 // Actions on single follow-up
 router.put('/follow-ups/:id', checkPermission(['leads:update', 'leads:update_own']), updateFollowUp);

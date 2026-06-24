@@ -211,7 +211,7 @@ export const processCsvJob = async (job) => {
                 }
             }
 
-            const rawPhone    = sanitizePhone(row['contact no'] || row['contact'] || row['number'] || row['phone'] || row['mobile'] || '');
+            const rawPhone    = sanitizePhone(row['contact'] || row['contact no'] || row['number'] || row['phone'] || row['mobile'] || '');
             const rawName     = row['business/person/shop/company name'] || row['business / person / shop / company name'] || row['name'] || '';
             const rawBusiness = row['business/person/shop/company name'] || row['business / person / shop / company name'] || row['business'] || row['business name'] || '';
 
@@ -255,29 +255,20 @@ export const processCsvJob = async (job) => {
             const dataMap = {};
             // Core templates mappings
             dataMap['date'] = row['date'] || '';
+            dataMap['employeeName'] = row['employee name'] || '';
             dataMap['businessType'] = row['business type'] || row['businesstype'] || '';
-            dataMap['pointOfContact'] = row['point of contact (name & number -not mandatory for products)'] || row['point of contact (name & number not mandatory for products)'] || row['point of contact'] || row['pointofcontact'] || '';
+            dataMap['businessName'] = rawBusiness;
             dataMap['area'] = row['area'] || '';
             dataMap['city'] = row['city'] || '';
-            dataMap['deliveredLocation'] = row['map location link/address'] || row['map location link / address'] || row['delivered location (google maps location)'] || row['delivered location'] || row['delivered'] || row['location'] || '';
-            dataMap['deliveredLink'] = row['delivered link'] || row['link'] || '';
+            dataMap['phone'] = rawPhone;
+            dataMap['deliveredLocation'] = row['map location link/address'] || row['map location link / address'] || row['delivered location'] || row['address'] || '';
+            dataMap['requirement'] = row['requirement'] || row['requirement/order (if any)'] || row['requirement/order\n(if any)'] || '';
             dataMap['remarks'] = row['remarks'] || '';
-            dataMap['recording'] = row['recording'] || '';
-            dataMap['appointment'] = row['appointment (yes/no)'] || row['appointment(yes/no)'] || row['appointment'] || '';
-            dataMap['appointmentDate'] = row['appointment date'] || row['appointmentdate'] || '';
-            dataMap['appointmentTimings'] = row['appointment timings'] || row['appointmenttimings'] || '';
-            dataMap['requirement'] = row['requirement/order (if any)'] || row['requirement/order\n(if any)'] || row['requirement(if any)'] || row['requirement (if any)'] || row['requirement'] || '';
-            dataMap['requireFollowUp'] = row['require follow up (yes/no)'] || row['require follow up (yes/no)'] || row['follow up require (yes/no)'] || row['require follow up'] || row['requirefollowup'] || '';
-            dataMap['followUpDate'] = row['follow up date'] || row['followupdate'] || '';
-            dataMap['followUpRemarks'] = row['follow up remarks'] || row['followupremarks'] || '';
-            dataMap['notesToCosTeam'] = row['notes to cos team (if any)'] || row['notes to cos team'] || row['notestocteam'] || '';
+            dataMap['requireFollowUp'] = row['follow up require (yes/no)'] || row['require follow up (yes/no)'] || row['follow up require'] || row['require follow up'] || '';
+            dataMap['followUpDate'] = row['follow up date'] || '';
+            dataMap['followUpRemarks'] = row['follow up remarks'] || '';
 
-            // Legacy / backward compat fields
-            dataMap['nameBusiness'] = row['name business'] || row['namebusiness'] || '';
             const empSpokenRaw = row['employee name'] || '';
-            dataMap['employeeName'] = empSpokenRaw;
-            dataMap['convertedStatus'] = row['converted status'] || row['converted'] || '';
-
             const empSpokenName = empSpokenRaw.toLowerCase().trim();
             const rowAssignedTo = agentMap.get(empSpokenName) || null;
 

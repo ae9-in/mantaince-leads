@@ -690,7 +690,7 @@ export const exportCostConversionsCsv = async (req, res) => {
         let sql = `
             SELECT
                 l.id, l.name, l.phone, l.business_name,
-                l.status, l.source, l.created_at,
+                l.status, l.source, l.created_at, l.data,
                 u.name  AS assignee_name,
                 sv.name AS sub_vertical_name
             FROM cost_conversions l
@@ -707,12 +707,53 @@ export const exportCostConversionsCsv = async (req, res) => {
         sql += ` ORDER BY l.created_at DESC`;
 
         const leadsRes = await query(sql, params);
+        const leads = leadsRes.rows;
 
-        const leads     = leadsRes.rows;
-        const csvHeader = 'ID,Name,Phone,Business Name,Status,Sub-Vertical,Employee Name,Source,Created At\n';
-        const csvRows   = leads.map(l =>
-            `"${l.id}","${l.name}","${l.phone}","${l.business_name}","${l.status}","${l.sub_vertical_name || ''}","${l.assignee_name || ''}","${l.source}","${l.created_at.toISOString()}"`
-        ).join('\n');
+        const escapeCsvVal = (val) => {
+            if (val === undefined || val === null) return '';
+            return val.toString().replace(/"/g, '""');
+        };
+
+        let csvHeader = '';
+        let csvRows = '';
+
+        if (leadType === 'POSITIVE') {
+            csvHeader = 'DATE,EMPLOYEE NAME,BUSINESS TYPE,BUSINESS / PERSON / SHOP / COMPANY NAME,AREA,CITY,CONTACT,MAP LOCATION LINK / ADDRESS,REQUIREMENT,REMARKS,FOLLOW UP REQUIRE (YES/NO),FOLLOW UP DATE,FOLLOW UP REMARKS,Status\n';
+            csvRows = leads.map(l => {
+                const d = l.data || {};
+                const dateVal = d.date || (l.created_at ? l.created_at.toISOString().split('T')[0] : '');
+                const empName = l.assignee_name || d.employeeName || '';
+                const bType = d.businessType || '';
+                const name = l.name || l.business_name || d.businessName || '';
+                const area = d.area || '';
+                const city = d.city || '';
+                const contact = l.phone || d.phone || '';
+                const mapLink = d.deliveredLocation || '';
+                const req = d.requirement || '';
+                const rem = d.remarks || '';
+                const fReq = d.requireFollowUp || '';
+                const fDate = d.followUpDate || '';
+                const fRem = d.followUpRemarks || '';
+                
+                return `"${escapeCsvVal(dateVal)}","${escapeCsvVal(empName)}","${escapeCsvVal(bType)}","${escapeCsvVal(name)}","${escapeCsvVal(area)}","${escapeCsvVal(city)}","${escapeCsvVal(contact)}","${escapeCsvVal(mapLink)}","${escapeCsvVal(req)}","${escapeCsvVal(rem)}","${escapeCsvVal(fReq)}","${escapeCsvVal(fDate)}","${escapeCsvVal(fRem)}","${escapeCsvVal(l.status)}"`;
+            }).join('\n');
+        } else {
+            csvHeader = 'DATE,EMPLOYEE NAME,BUSINESS TYPE,BUSINESS / PERSON / SHOP / COMPANY NAME,AREA,CITY,CONTACT,MAP LOCATION LINK / ADDRESS,REQUIREMENT,Status\n';
+            csvRows = leads.map(l => {
+                const d = l.data || {};
+                const dateVal = d.date || (l.created_at ? l.created_at.toISOString().split('T')[0] : '');
+                const empName = l.assignee_name || d.employeeName || '';
+                const bType = d.businessType || '';
+                const name = l.name || l.business_name || d.businessName || '';
+                const area = d.area || '';
+                const city = d.city || '';
+                const contact = l.phone || d.phone || '';
+                const mapLink = d.deliveredLocation || '';
+                const req = d.requirement || '';
+                
+                return `"${escapeCsvVal(dateVal)}","${escapeCsvVal(empName)}","${escapeCsvVal(bType)}","${escapeCsvVal(name)}","${escapeCsvVal(area)}","${escapeCsvVal(city)}","${escapeCsvVal(contact)}","${escapeCsvVal(mapLink)}","${escapeCsvVal(req)}","${escapeCsvVal(l.status)}"`;
+            }).join('\n');
+        }
 
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', `attachment; filename=cost-conversions-export-${Date.now()}.csv`);

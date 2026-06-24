@@ -38,17 +38,10 @@ import VerticalSelectionBar from '../components/VerticalSelectionBar.jsx';
 const BASE_DYNAMIC_FIELDS = [
   { key: 'date', label: 'Date', type: 'date', defaultValue: '' },
   { key: 'businessType', label: 'Business Type', type: 'text', defaultValue: '' },
-  { key: 'pointOfContact', label: 'Point of Contact (Name & Number)', type: 'text', defaultValue: '' },
   { key: 'area', label: 'Area', type: 'text', defaultValue: '' },
   { key: 'city', label: 'City', type: 'text', defaultValue: '' },
   { key: 'deliveredLocation', label: 'Map Location Link / Address', type: 'text', defaultValue: '' },
-  { key: 'remarks', label: 'Remarks', type: 'text', defaultValue: '' },
-  { key: 'recording', label: 'Recording', type: 'text', defaultValue: '' },
-  { key: 'appointment', label: 'Appointment (Yes/No)', type: 'text', defaultValue: '' },
-  { key: 'appointmentDate', label: 'Appointment Date', type: 'date', defaultValue: '' },
-  { key: 'appointmentTimings', label: 'Appointment Timings', type: 'text', defaultValue: '' },
-  { key: 'requirement', label: 'Requirement/Order (If Any)', type: 'text', defaultValue: '' },
-  { key: 'notesToCosTeam', label: 'Notes to COS Team (If any)', type: 'text', defaultValue: '' },
+  { key: 'requirement', label: 'Requirement', type: 'text', defaultValue: '' },
 ];
 
 const BASE_DYNAMIC_FIELD_KEYS = new Set(BASE_DYNAMIC_FIELDS.map((field) => field.key));
@@ -778,23 +771,13 @@ export const LeadsPage = () => {
         ),
       },
       {
-        accessorKey: 'name',
-        header: 'Name',
-        cell: ({ row }) => (
-          <button
-            type="button"
-            className="font-bold text-[--accent] hover:underline text-left text-xs"
-            onClick={() => navigate(`/leads/${row.original._id}`)}
-          >
-            {row.original.name}
-          </button>
-        ),
+        id: 'date',
+        header: 'DATE',
+        cell: ({ row }) => formatDynamicValue('date', getLeadData(row.original, 'date')),
       },
-      { accessorKey: 'phone', header: 'Number' },
-      { accessorKey: 'businessName', header: 'Business' },
       {
         accessorKey: 'assignee_name',
-        header: 'Employee Name',
+        header: 'EMPLOYEE NAME',
         cell: ({ row }) => (
           <div className="flex items-center gap-1.5">
             <div className="w-5 h-5 rounded bg-stone-100 flex items-center justify-center text-[8px] border border-stone-200 font-bold">
@@ -805,33 +788,37 @@ export const LeadsPage = () => {
         ),
       },
       {
-        id: 'date',
-        header: 'Date',
-        cell: ({ row }) => formatDynamicValue('date', getLeadData(row.original, 'date')),
-      },
-      {
         id: 'businessType',
-        header: 'Business Type',
+        header: 'BUSINESS TYPE',
         cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'businessType')),
       },
       {
-        id: 'pointOfContact',
-        header: 'Point of Contact',
-        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'pointOfContact')),
+        accessorKey: 'name',
+        header: 'BUSINESS / PERSON / SHOP / COMPANY NAME',
+        cell: ({ row }) => (
+          <button
+            type="button"
+            className="font-bold text-[--accent] hover:underline text-left text-xs bg-transparent border-0 outline-none p-0 cursor-pointer"
+            onClick={() => navigate(`/leads/${row.original._id}`)}
+          >
+            {row.original.name || row.original.businessName || row.original.business_name}
+          </button>
+        ),
       },
       {
         id: 'area',
-        header: 'Area',
+        header: 'AREA',
         cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'area')),
       },
       {
         id: 'city',
-        header: 'City',
+        header: 'CITY',
         cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'city')),
       },
+      { accessorKey: 'phone', header: 'CONTACT' },
       {
         id: 'deliveredLocation',
-        header: 'Map Location Link / Address',
+        header: 'MAP LOCATION LINK / ADDRESS',
         cell: ({ row }) => {
           const value = getLeadData(row.original, 'deliveredLocation');
           if (!value) return '-';
@@ -847,43 +834,13 @@ export const LeadsPage = () => {
         },
       },
       {
-        id: 'remarks',
-        header: 'Remarks',
-        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'remarks')),
-      },
-      {
-        id: 'recording',
-        header: 'Recording',
-        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'recording')),
-      },
-      {
-        id: 'appointment',
-        header: 'Appointment (Yes/No)',
-        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'appointment')),
-      },
-      {
-        id: 'appointmentDate',
-        header: 'Appointment Date',
-        cell: ({ row }) => formatDynamicValue('date', getLeadData(row.original, 'appointmentDate')),
-      },
-      {
-        id: 'appointmentTimings',
-        header: 'Appointment Timings',
-        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'appointmentTimings')),
-      },
-      {
         id: 'requirement',
-        header: 'Requirement/Order (If Any)',
+        header: 'REQUIREMENT',
         cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'requirement')),
       },
       {
-        id: 'notesToCosTeam',
-        header: 'Notes to COS Team',
-        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'notesToCosTeam')),
-      },
-      {
         accessorKey: 'status',
-        header: 'Lead Status',
+        header: 'Status',
         cell: ({ row }) => <StatusBadge status={row.original.status} />,
       },
       {
@@ -1455,15 +1412,85 @@ export const LeadsPage = () => {
             <form onSubmit={handleLeadSubmit} className="flex flex-col flex-1 overflow-hidden min-h-0">
               <div className="flex-1 overflow-y-auto pr-3 space-y-6 min-h-0 py-1">
                 <FormSection title="Lead Fields">
-                  <FormField label="Name *">
-                    <input required value={leadFormName} onChange={(event) => setLeadFormName(event.target.value)} />
+                  <FormField label="Date">
+                    <input
+                      type="date"
+                      value={getDynamicValue(leadFormDynamic, 'date')}
+                      onChange={(event) => handleDynamicChange('date', event.target.value)}
+                    />
                   </FormField>
-                  <FormField label="Number *">
-                    <input required value={leadFormPhone} onChange={(event) => setLeadFormPhone(event.target.value)} />
+
+                  <FormField label="Employee Name">
+                    <select
+                      value={leadFormAssignedTo}
+                      onChange={(event) => setLeadFormAssignedTo(event.target.value)}
+                    >
+                      <option value="">-- Unassigned --</option>
+                      {agents.map((agent) => (
+                        <option key={agent.id} value={agent.id}>{agent.name} ({agent.email})</option>
+                      ))}
+                    </select>
                   </FormField>
-                  <FormField label="Business">
-                    <input value={leadFormBusiness} onChange={(event) => setLeadFormBusiness(event.target.value)} />
+
+                  <FormField label="Business Type">
+                    <input
+                      type="text"
+                      value={getDynamicValue(leadFormDynamic, 'businessType')}
+                      onChange={(event) => handleDynamicChange('businessType', event.target.value)}
+                    />
                   </FormField>
+
+                  <FormField label="BUSINESS / PERSON / SHOP / COMPANY NAME *">
+                    <input
+                      required
+                      value={leadFormName}
+                      onChange={(event) => {
+                        setLeadFormName(event.target.value);
+                        setLeadFormBusiness(event.target.value);
+                      }}
+                    />
+                  </FormField>
+
+                  <FormField label="Area">
+                    <input
+                      type="text"
+                      value={getDynamicValue(leadFormDynamic, 'area')}
+                      onChange={(event) => handleDynamicChange('area', event.target.value)}
+                    />
+                  </FormField>
+
+                  <FormField label="City">
+                    <input
+                      type="text"
+                      value={getDynamicValue(leadFormDynamic, 'city')}
+                      onChange={(event) => handleDynamicChange('city', event.target.value)}
+                    />
+                  </FormField>
+
+                  <FormField label="Contact *">
+                    <input
+                      required
+                      value={leadFormPhone}
+                      onChange={(event) => setLeadFormPhone(event.target.value)}
+                    />
+                  </FormField>
+
+                  <FormField label="Map Location Link / Address">
+                    <input
+                      type="text"
+                      value={getDynamicValue(leadFormDynamic, 'deliveredLocation')}
+                      onChange={(event) => handleDynamicChange('deliveredLocation', event.target.value)}
+                    />
+                  </FormField>
+
+                  <FormField label="Requirement">
+                    <input
+                      type="text"
+                      value={getDynamicValue(leadFormDynamic, 'requirement')}
+                      onChange={(event) => handleDynamicChange('requirement', event.target.value)}
+                    />
+                  </FormField>
+
                   {!subVerticalFilter && (
                     <FormField label="Sub-Vertical">
                       <select
@@ -1477,18 +1504,6 @@ export const LeadsPage = () => {
                       </select>
                     </FormField>
                   )}
-
-                  <FormField label="Employee Name">
-                    <select
-                      value={leadFormAssignedTo}
-                      onChange={(event) => setLeadFormAssignedTo(event.target.value)}
-                    >
-                      <option value="">-- Unassigned --</option>
-                      {agents.map((agent) => (
-                        <option key={agent.id} value={agent.id}>{agent.name} ({agent.email})</option>
-                      ))}
-                    </select>
-                  </FormField>
 
                   <FormField label="Lead Type">
                     <select
@@ -1528,16 +1543,6 @@ export const LeadsPage = () => {
                       />
                     </div>
                   )}
-
-                  {BASE_DYNAMIC_FIELDS.map((field) => (
-                    <FormField key={field.key} label={field.label}>
-                      <input
-                        type={field.type === 'date' ? 'date' : field.type === 'url' ? 'url' : 'text'}
-                        value={getDynamicValue(leadFormDynamic, field.key)}
-                        onChange={(event) => handleDynamicChange(field.key, event.target.value)}
-                      />
-                    </FormField>
-                  ))}
                 </FormSection>
 
                 {customConfigs.length > 0 && (

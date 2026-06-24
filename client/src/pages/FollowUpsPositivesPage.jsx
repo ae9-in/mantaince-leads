@@ -41,14 +41,12 @@ const BASE_DYNAMIC_FIELDS = [
   { key: 'businessType', label: 'Business Type', type: 'text', defaultValue: '' },
   { key: 'area', label: 'Area', type: 'text', defaultValue: '' },
   { key: 'city', label: 'City', type: 'text', defaultValue: '' },
-  { key: 'pointOfContact', label: 'Point of Contact (Name & Number)', type: 'text', defaultValue: '' },
+  { key: 'deliveredLocation', label: 'Map Location Link / Address', type: 'text', defaultValue: '' },
+  { key: 'requirement', label: 'Requirement', type: 'text', defaultValue: '' },
   { key: 'remarks', label: 'Remarks', type: 'text', defaultValue: '' },
-  { key: 'recording', label: 'Recording', type: 'text', defaultValue: '' },
-  { key: 'requirement', label: 'Requirement (If Any)', type: 'text', defaultValue: '' },
   { key: 'requireFollowUp', label: 'Require Follow Up (Yes/No)', type: 'text', defaultValue: '' },
   { key: 'followUpDate', label: 'Follow Up Date', type: 'date', defaultValue: '' },
   { key: 'followUpRemarks', label: 'Follow Up Remarks', type: 'text', defaultValue: '' },
-  { key: 'notesToCosTeam', label: 'Notes to COS Team (If any)', type: 'text', defaultValue: '' },
 ];
 
 const BASE_DYNAMIC_FIELD_KEYS = new Set(BASE_DYNAMIC_FIELDS.map((field) => field.key));
@@ -855,23 +853,13 @@ export const FollowUpsPositivesPage = () => {
         ),
       },
       {
-        accessorKey: 'name',
-        header: 'Name',
-        cell: ({ row }) => (
-          <button
-            type="button"
-            className="font-bold text-[--accent] hover:underline text-left text-xs bg-transparent border-0 outline-none p-0 cursor-pointer"
-            onClick={() => navigate(`/leads/${row.original._id}`)}
-          >
-            {row.original.name}
-          </button>
-        ),
+        id: 'date',
+        header: 'DATE',
+        cell: ({ row }) => formatDynamicValue('date', getLeadData(row.original, 'date')),
       },
-      { accessorKey: 'phone', header: 'Number' },
-      { accessorKey: 'businessName', header: 'Business' },
       {
         accessorKey: 'assignee_name',
-        header: 'Employee Name',
+        header: 'EMPLOYEE NAME',
         cell: ({ row }) => (
           <div className="flex items-center gap-1.5">
             <div className="w-5 h-5 rounded bg-stone-100 flex items-center justify-center text-[8px] border border-stone-200 font-bold">
@@ -882,68 +870,79 @@ export const FollowUpsPositivesPage = () => {
         ),
       },
       {
-        id: 'date',
-        header: 'Date',
-        cell: ({ row }) => formatDynamicValue('date', getLeadData(row.original, 'date')),
-      },
-      {
         id: 'businessType',
-        header: 'Business Type',
+        header: 'BUSINESS TYPE',
         cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'businessType')),
       },
       {
+        accessorKey: 'name',
+        header: 'BUSINESS / PERSON / SHOP / COMPANY NAME',
+        cell: ({ row }) => (
+          <button
+            type="button"
+            className="font-bold text-[--accent] hover:underline text-left text-xs bg-transparent border-0 outline-none p-0 cursor-pointer"
+            onClick={() => navigate(`/leads/${row.original._id}`)}
+          >
+            {row.original.name || row.original.businessName || row.original.business_name}
+          </button>
+        ),
+      },
+      {
         id: 'area',
-        header: 'Area',
+        header: 'AREA',
         cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'area')),
       },
       {
         id: 'city',
-        header: 'City',
+        header: 'CITY',
         cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'city')),
       },
+      { accessorKey: 'phone', header: 'CONTACT' },
       {
-        id: 'pointOfContact',
-        header: 'Point of Contact',
-        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'pointOfContact')),
-      },
-      {
-        id: 'remarks',
-        header: 'Remarks',
-        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'remarks')),
-      },
-      {
-        id: 'recording',
-        header: 'Recording',
-        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'recording')),
+        id: 'deliveredLocation',
+        header: 'MAP LOCATION LINK / ADDRESS',
+        cell: ({ row }) => {
+          const value = getLeadData(row.original, 'deliveredLocation');
+          if (!value) return '-';
+          if (value.startsWith('http://') || value.startsWith('https://')) {
+            return (
+              <a href={value} target="_blank" rel="noreferrer" className="text-[--accent] hover:underline flex items-center gap-1">
+                <span>Location Link</span>
+                <ExternalLink size={10} />
+              </a>
+            );
+          }
+          return formatDynamicValue('text', value);
+        },
       },
       {
         id: 'requirement',
-        header: 'Requirement (If Any)',
+        header: 'REQUIREMENT',
         cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'requirement')),
       },
       {
+        id: 'remarks',
+        header: 'REMARKS',
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'remarks')),
+      },
+      {
         id: 'requireFollowUp',
-        header: 'Require Follow Up',
+        header: 'FOLLOW UP REQUIRE (YES/NO)',
         cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'requireFollowUp')),
       },
       {
         id: 'followUpDate',
-        header: 'Follow Up Date',
+        header: 'FOLLOW UP DATE',
         cell: ({ row }) => formatDynamicValue('date', getLeadData(row.original, 'followUpDate')),
       },
       {
         id: 'followUpRemarks',
-        header: 'Follow Up Remarks',
+        header: 'FOLLOW UP REMARKS',
         cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'followUpRemarks')),
       },
       {
-        id: 'notesToCosTeam',
-        header: 'Notes to COS Team',
-        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'notesToCosTeam')),
-      },
-      {
         accessorKey: 'status',
-        header: 'Lead Status',
+        header: 'Status',
         cell: ({ row }) => <StatusBadge status={row.original.status} />,
       },
       {
@@ -1525,62 +1524,17 @@ export const FollowUpsPositivesPage = () => {
 
             <form onSubmit={handleLeadSubmit} className="flex flex-col flex-1 overflow-hidden min-h-0">
               <div className="flex-1 overflow-y-auto pr-3 space-y-4 py-1">
-                {/* Row 1: Contact Name + Phone Number */}
+                {/* Row 1: Date + Employee Name */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Contact Name *</span>
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Date</span>
                     <input
-                      type="text"
-                      required
-                      value={leadFormName}
-                      onChange={(e) => setLeadFormName(e.target.value)}
+                      type="date"
+                      value={getLeadData({ data: leadFormDynamic }, 'date')}
+                      onChange={(e) => handleDynamicChange('date', e.target.value)}
                       className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="Enter name"
                     />
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Phone Number *</span>
-                    <input
-                      type="text"
-                      required
-                      value={leadFormPhone}
-                      onChange={(e) => setLeadFormPhone(e.target.value)}
-                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="Enter phone number"
-                    />
-                  </div>
-                </div>
-
-                {/* Row 2: Business Name + Sub-Vertical */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Business Name</span>
-                    <input
-                      type="text"
-                      value={leadFormBusiness}
-                      onChange={(e) => setLeadFormBusiness(e.target.value)}
-                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="Enter business"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Sub-Vertical *</span>
-                    <select
-                      required
-                      value={leadFormSubVerticalId}
-                      onChange={(e) => setLeadFormSubVerticalId(e.target.value)}
-                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent] font-semibold"
-                    >
-                      <option value="">-- Choose Sub-vertical --</option>
-                      {subVerticals.map(sub => (
-                        <option key={sub._id} value={sub._id}>{sub.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {/* Row 3: Employee Name + Status */}
-                <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
                     <span className="text-[10px] font-black uppercase text-[--text-secondary]">Employee Name</span>
                     <select
@@ -1594,31 +1548,10 @@ export const FollowUpsPositivesPage = () => {
                       ))}
                     </select>
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Status</span>
-                    <select
-                      value={leadFormStatus}
-                      onChange={(e) => setLeadFormStatus(e.target.value)}
-                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent] font-semibold"
-                    >
-                      {STATUS_OPTIONS.map(st => (
-                        <option key={st.value || st} value={st.value || st}>{st.label || st}</option>
-                      ))}
-                    </select>
-                  </div>
                 </div>
 
-                {/* Row 4: Date + Business Type */}
-                <div className="border-t border-stone-100 pt-4 grid grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Date</span>
-                    <input
-                      type="date"
-                      value={getLeadData({ data: leadFormDynamic }, 'date')}
-                      onChange={(e) => handleDynamicChange('date', e.target.value)}
-                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                    />
-                  </div>
+                {/* Row 2: Business Type + Business/Person/Shop/Company Name */}
+                <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
                     <span className="text-[10px] font-black uppercase text-[--text-secondary]">Business Type</span>
                     <input
@@ -1629,9 +1562,23 @@ export const FollowUpsPositivesPage = () => {
                       placeholder="e.g. Retail, Wholesale"
                     />
                   </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">BUSINESS / PERSON / SHOP / COMPANY NAME *</span>
+                    <input
+                      type="text"
+                      required
+                      value={leadFormName}
+                      onChange={(e) => {
+                        setLeadFormName(e.target.value);
+                        setLeadFormBusiness(e.target.value);
+                      }}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                      placeholder="Enter name/business"
+                    />
+                  </div>
                 </div>
 
-                {/* Row 5: Area + City */}
+                {/* Row 3: Area + City */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
                     <span className="text-[10px] font-black uppercase text-[--text-secondary]">Area</span>
@@ -1655,46 +1602,35 @@ export const FollowUpsPositivesPage = () => {
                   </div>
                 </div>
 
-                {/* Row 6: Point of Contact (full width) */}
-                <div className="flex flex-col gap-1">
-                  <span className="text-[10px] font-black uppercase text-[--text-secondary]">Point of Contact (Name &amp; Number, not mandatory for products)</span>
-                  <input
-                    type="text"
-                    value={getLeadData({ data: leadFormDynamic }, 'pointOfContact')}
-                    onChange={(e) => handleDynamicChange('pointOfContact', e.target.value)}
-                    className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                    placeholder="Name & contact number"
-                  />
-                </div>
-
-                {/* Row 7: Remarks + Recording */}
+                {/* Row 4: Contact + Map Location Link / Address */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Remarks</span>
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Contact *</span>
                     <input
                       type="text"
-                      value={getLeadData({ data: leadFormDynamic }, 'remarks')}
-                      onChange={(e) => handleDynamicChange('remarks', e.target.value)}
+                      required
+                      value={leadFormPhone}
+                      onChange={(e) => setLeadFormPhone(e.target.value)}
                       className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="Any remarks"
+                      placeholder="Enter contact number"
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Recording</span>
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Map Location Link / Address</span>
                     <input
                       type="text"
-                      value={getLeadData({ data: leadFormDynamic }, 'recording')}
-                      onChange={(e) => handleDynamicChange('recording', e.target.value)}
+                      value={getLeadData({ data: leadFormDynamic }, 'deliveredLocation')}
+                      onChange={(e) => handleDynamicChange('deliveredLocation', e.target.value)}
                       className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="Recording link or reference"
+                      placeholder="Google Maps link or Address"
                     />
                   </div>
                 </div>
 
-                {/* Row 8: Requirement + Require Follow Up */}
+                {/* Row 5: Requirement + Remarks */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Requirement (If Any)</span>
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Requirement</span>
                     <input
                       type="text"
                       value={getLeadData({ data: leadFormDynamic }, 'requirement')}
@@ -1704,7 +1640,21 @@ export const FollowUpsPositivesPage = () => {
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Require Follow Up (Yes/No)</span>
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Remarks</span>
+                    <input
+                      type="text"
+                      value={getLeadData({ data: leadFormDynamic }, 'remarks')}
+                      onChange={(e) => handleDynamicChange('remarks', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                      placeholder="Remarks"
+                    />
+                  </div>
+                </div>
+
+                {/* Row 6: Follow Up Require + Follow Up Date */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow Up Require (Yes/No)</span>
                     <select
                       value={getLeadData({ data: leadFormDynamic }, 'requireFollowUp')}
                       onChange={(e) => handleDynamicChange('requireFollowUp', e.target.value)}
@@ -1715,10 +1665,6 @@ export const FollowUpsPositivesPage = () => {
                       <option value="NO">NO</option>
                     </select>
                   </div>
-                </div>
-
-                {/* Row 9: Follow Up Date + Follow Up Remarks */}
-                <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
                     <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow Up Date</span>
                     <input
@@ -1728,28 +1674,48 @@ export const FollowUpsPositivesPage = () => {
                       className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
                     />
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow Up Remarks</span>
-                    <input
-                      type="text"
-                      value={getLeadData({ data: leadFormDynamic }, 'followUpRemarks')}
-                      onChange={(e) => handleDynamicChange('followUpRemarks', e.target.value)}
-                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="Follow up notes"
-                    />
-                  </div>
                 </div>
 
-                {/* Row 10: Notes to COS Team (full width) */}
+                {/* Row 7: Follow Up Remarks */}
                 <div className="flex flex-col gap-1">
-                  <span className="text-[10px] font-black uppercase text-[--text-secondary]">Notes to COS Team (If any)</span>
+                  <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow Up Remarks</span>
                   <input
                     type="text"
-                    value={getLeadData({ data: leadFormDynamic }, 'notesToCosTeam')}
-                    onChange={(e) => handleDynamicChange('notesToCosTeam', e.target.value)}
+                    value={getLeadData({ data: leadFormDynamic }, 'followUpRemarks')}
+                    onChange={(e) => handleDynamicChange('followUpRemarks', e.target.value)}
                     className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                    placeholder="Notes for COS team"
+                    placeholder="Follow up notes"
                   />
+                </div>
+
+                {/* Row 8: Sub-Vertical + Status */}
+                <div className="border-t border-stone-100 pt-4 grid grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Sub-Vertical *</span>
+                    <select
+                      required
+                      value={leadFormSubVerticalId}
+                      onChange={(e) => setLeadFormSubVerticalId(e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent] font-semibold"
+                    >
+                      <option value="">-- Choose Sub-vertical --</option>
+                      {subVerticals.map(sub => (
+                        <option key={sub._id} value={sub._id}>{sub.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Status</span>
+                    <select
+                      value={leadFormStatus}
+                      onChange={(e) => setLeadFormStatus(e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent] font-semibold"
+                    >
+                      {STATUS_OPTIONS.map(st => (
+                        <option key={st.value || st} value={st.value || st}>{st.label || st}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 {/* Dynamic configs (vertical-specific extra fields) */}

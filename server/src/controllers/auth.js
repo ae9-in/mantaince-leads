@@ -52,11 +52,13 @@ export const login = async (req, res) => {
     const user = userRes.rows[0];
 
     if (!user || !user.is_active) {
+      console.log(`[Login Failed] User not found or inactive. Email: "${email}"`);
       return res.status(401).json({ success: false, error: 'Invalid email or password' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password_hash);
     if (!isMatch) {
+      console.log(`[Login Failed] Password mismatch for email: "${email}". Received password length: ${password?.length}, password: "${password}"`);
       return res.status(401).json({ success: false, error: 'Invalid email or password' });
     }
 

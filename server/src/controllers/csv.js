@@ -30,45 +30,92 @@ export const downloadCsvTemplate = async (req, res) => {
     const configsRes = await query('SELECT * FROM field_configs WHERE vertical_id = $1 AND is_csv_mapped = true ORDER BY display_order ASC', [verticalId]);
     const configs = configsRes.rows;
 
-    const baseHeaders = [
-      'DATE',
-      'EMPLOYEE NAME',
-      'BUSINESS TYPE',
-      'BUSINESS/PERSON/SHOP/COMPANY NAME',
-      'AREA',
-      'CITY',
-      'CONTACT NO',
-      'Point of contact (NAME & NUMBER not mandatory for products)',
-      'REMARKS',
-      'RECORDING',
-      'REQUIREMENT(IF ANY)',
-      'REQUIRE FOLLOW UP (YES/NO)',
-      'FOLLOW UP DATE',
-      'FOLLOW UP REMARKS',
-      'NOTES TO COS TEAM (If any)',
-      'Lead Type',
-      'Status',
-    ];
+    const { leadType = 'CALL' } = req.query;
 
-    const baseExample = [
-      '2026-06-24',
-      'Jane Smith',
-      'Retail / Wholesale',
-      'Acme Corp',
-      'MG Road',
-      'Bangalore',
-      '+919876543210',
-      'Ramesh Kumar - 9876543210',
-      'Interested in bulk order',
-      '',
-      '50 units of product X',
-      'YES',
-      '2026-06-30',
-      'Call back after 5 PM',
-      '',
-      'CALL',
-      'new',
-    ];
+    let baseHeaders = [];
+    let baseExample = [];
+
+    if (leadType === 'POSITIVE') {
+      baseHeaders = [
+        'DATE',
+        'EMPLOYEE NAME',
+        'BUSINESS TYPE',
+        'BUSINESS / PERSON / SHOP / COMPANY NAME',
+        'AREA',
+        'CITY',
+        'CONTACT NO',
+        'Point of contact (NAME & NUMBER -not mandatory for products)',
+        'REMARKS',
+        'RECORDING',
+        'REQUIRE FOLLOW UP  (YES/NO)',
+        'FOLLOW UP DATE',
+        'FOLLOW UP REMARKS',
+        'REQUIREMENT(IF ANY)',
+        'NOTES TO COS TEAM (If any)',
+        'Lead Type',
+        'Status',
+      ];
+      baseExample = [
+        '2026-06-05',
+        'Pavan Rag',
+        'Pooja SA',
+        'Sai Balaji Astrology Center Best Astrologer in Bangalore',
+        'btm',
+        'Bangalore',
+        '8867309966',
+        '',
+        'didn’t pick',
+        '',
+        'No',
+        '',
+        '',
+        "didn't pick",
+        '',
+        'POSITIVE',
+        'new',
+      ];
+    } else {
+      baseHeaders = [
+        'DATE',
+        'EMPLOYEE NAME',
+        'BUSINESS TYPE',
+        'BUSINESS / PERSON / SHOP / COMPANY NAME',
+        'CONTACT NO',
+        'Point of contact (NAME & NUMBER -not mandatory for products)',
+        'AREA',
+        'CITY',
+        'MAP LOCATION LINK / ADDRESS',
+        'REMARKS',
+        'RECORDING',
+        'APPOINTMENT (YES/NO)',
+        'APPOINTMENT DATE',
+        'APPOINTMENT TIMINGS',
+        'REQUIREMENT/ORDER\n(IF ANY)',
+        'NOTES TO COS TEAM (If any)',
+        'Lead Type',
+        'Status',
+      ];
+      baseExample = [
+        '2026-06-09',
+        'shubhanga v',
+        'Retail / Wholesale',
+        'Sattva Awakening',
+        '81054 16505',
+        '',
+        'Whitefield',
+        'Bangalore',
+        'https://share.google/WcGZL21tLNSJM7J9Z',
+        'hanumanth raju told to come after 12pm 10-06-2026 with samples and details',
+        '',
+        'YES',
+        '2026-06-10',
+        '12:00 PM',
+        '',
+        '',
+        'CALL',
+        'new',
+      ];
+    }
 
     const customHeaders = configs.map(c => c.csv_header || c.label);
     const headers = [...baseHeaders, ...customHeaders];
@@ -119,6 +166,10 @@ export const uploadCsv = async (req, res) => {
     const logId = crypto.randomUUID();
     const fileName = `${logId}.csv`;
     const uploadPath = path.join(__dirname, '../../uploads', fileName);
+    const uploadDir = path.dirname(uploadPath);
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
 
     // Save uploaded file buffer to disk
     fs.writeFileSync(uploadPath, file.buffer);

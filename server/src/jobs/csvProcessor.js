@@ -20,8 +20,23 @@ const sanitizeFormula = (val) => {
  * Coerces phone format — keeps only digits and leading +
  */
 const sanitizePhone = (phone) => {
-    if (!phone) return '';
-    return phone.toString().replace(/[^\d+]/g, '');
+    if (phone === undefined || phone === null) return '';
+    let str = phone.toString().trim();
+    if (!str) return '';
+    
+    // Split by common delimiters like slash, comma, semicolon, "or"/"and" with word boundaries, or opening parenthesis
+    const parts = str.split(/\/|,|;|\b(or|and)\b|\(/i);
+    let mainPart = parts[0].trim();
+    
+    const subParts = mainPart.split(/\s+/);
+    if (subParts.length > 1) {
+        const cleanFirstSubpart = subParts[0].replace(/[^\d+]/g, '');
+        if (cleanFirstSubpart.length >= 10 || (cleanFirstSubpart.startsWith('+') && cleanFirstSubpart.length >= 8)) {
+            mainPart = subParts[0];
+        }
+    }
+    
+    return mainPart.replace(/[^\d+]/g, '');
 };
 
 /**
@@ -154,12 +169,16 @@ export const processCsvJob = async (job) => {
         for (const rawRow of rows) {
             const row = {};
             for (const k of Object.keys(rawRow)) {
-                const key = k.toLowerCase().trim();
+                let key = k.toLowerCase().trim();
+                // Normalize newlines, slashes with spaces, and multiple spaces
+                key = key.replace(/\r?\n/g, ' ')
+                         .replace(/\s*\/\s*/g, '/')
+                         .replace(/\s+/g, ' ');
                 if (key !== '__proto__' && key !== 'constructor' && key !== 'prototype') {
                     row[key] = rawRow[k];
                 }
             }
-            const rawPhone = sanitizePhone(row['number'] || row['phone'] || row['mobile'] || row['contact no'] || row['contact'] || '');
+            const rawPhone = sanitizePhone(row['contact no'] || row['contact'] || row['number'] || row['phone'] || row['mobile'] || '');
             if (rawPhone) {
                 csvPhones.push(rawPhone);
             }
@@ -182,15 +201,19 @@ export const processCsvJob = async (job) => {
 
             const row = {};
             for (const k of Object.keys(rawRow)) {
-                const key = k.toLowerCase().trim();
+                let key = k.toLowerCase().trim();
+                // Normalize newlines, slashes with spaces, and multiple spaces
+                key = key.replace(/\r?\n/g, ' ')
+                         .replace(/\s*\/\s*/g, '/')
+                         .replace(/\s+/g, ' ');
                 if (key !== '__proto__' && key !== 'constructor' && key !== 'prototype') {
                     row[key] = sanitizeFormula(rawRow[k]);
                 }
             }
 
             const rawPhone    = sanitizePhone(row['contact no'] || row['contact'] || row['number'] || row['phone'] || row['mobile'] || '');
-            const rawName     = row['business/person/shop/company name'] || row['name'] || '';
-            const rawBusiness = row['business/person/shop/company name'] || row['business'] || row['business name'] || '';
+            const rawName     = row['business/person/shop/company name'] || row['business / person / shop / company name'] || row['name'] || '';
+            const rawBusiness = row['business/person/shop/company name'] || row['business / person / shop / company name'] || row['business'] || row['business name'] || '';
 
             if (!rawPhone) {
                 errors.push({ row: rowNum, reason: 'Missing phone number' });
@@ -230,23 +253,27 @@ export const processCsvJob = async (job) => {
             }
 
             const dataMap = {};
-            // New template field mappings
+            // Core templates mappings
             dataMap['date'] = row['date'] || '';
             dataMap['businessType'] = row['business type'] || row['businesstype'] || '';
+            dataMap['pointOfContact'] = row['point of contact (name & number -not mandatory for products)'] || row['point of contact (name & number not mandatory for products)'] || row['point of contact'] || row['pointofcontact'] || '';
             dataMap['area'] = row['area'] || '';
             dataMap['city'] = row['city'] || '';
-            dataMap['pointOfContact'] = row['point of contact (name & number not mandatory for products)'] || row['point of contact'] || row['pointofcontact'] || '';
+            dataMap['deliveredLocation'] = row['map location link/address'] || row['map location link / address'] || row['delivered location (google maps location)'] || row['delivered location'] || row['delivered'] || row['location'] || '';
+            dataMap['deliveredLink'] = row['delivered link'] || row['link'] || '';
             dataMap['remarks'] = row['remarks'] || '';
             dataMap['recording'] = row['recording'] || '';
-            dataMap['requirement'] = row['requirement(if any)'] || row['requirement (if any)'] || row['requirement'] || '';
-            dataMap['requireFollowUp'] = row['require follow up (yes/no)'] || row['require follow up'] || row['requirefollowup'] || '';
+            dataMap['appointment'] = row['appointment (yes/no)'] || row['appointment(yes/no)'] || row['appointment'] || '';
+            dataMap['appointmentDate'] = row['appointment date'] || row['appointmentdate'] || '';
+            dataMap['appointmentTimings'] = row['appointment timings'] || row['appointmenttimings'] || '';
+            dataMap['requirement'] = row['requirement/order (if any)'] || row['requirement/order\n(if any)'] || row['requirement(if any)'] || row['requirement (if any)'] || row['requirement'] || '';
+            dataMap['requireFollowUp'] = row['require follow up (yes/no)'] || row['require follow up (yes/no)'] || row['follow up require (yes/no)'] || row['require follow up'] || row['requirefollowup'] || '';
             dataMap['followUpDate'] = row['follow up date'] || row['followupdate'] || '';
             dataMap['followUpRemarks'] = row['follow up remarks'] || row['followupremarks'] || '';
             dataMap['notesToCosTeam'] = row['notes to cos team (if any)'] || row['notes to cos team'] || row['notestocteam'] || '';
+
             // Legacy / backward compat fields
             dataMap['nameBusiness'] = row['name business'] || row['namebusiness'] || '';
-            dataMap['deliveredLocation'] = row['delivered location (google maps location)'] || row['delivered location'] || row['delivered'] || row['location'] || '';
-            dataMap['deliveredLink'] = row['delivered link'] || row['link'] || '';
             const empSpokenRaw = row['employee name'] || row['employee spoken'] || row['employee'] || row['spoken'] || '';
             dataMap['employeeSpoken'] = empSpokenRaw;
             dataMap['convertedStatus'] = row['converted status'] || row['converted'] || '';
@@ -286,7 +313,8 @@ export const processCsvJob = async (job) => {
                 businessName: rawBusiness, data: dataMap,
                 assignedTo: rowAssignedTo,
                 leadType: leadTypeVal,
-                status: statusVal
+                status: statusVal,
+                csvRowNum: rowNum
             });
 
             phoneSet.add(rawPhone);
@@ -316,9 +344,18 @@ export const processCsvJob = async (job) => {
                 const result = await query(sql, params);
                 successCount += result.rowCount;
             } catch (chunkErr) {
-                const chunkStart = i + 1;
-                const chunkEnd   = Math.min(i + BATCH_SIZE, validLeads.length);
-                errors.push({ row: `${chunkStart}-${chunkEnd}`, reason: chunkErr.message });
+                console.warn(`[CSV Processor] Bulk insert failed for row range ${i + 1} to ${Math.min(i + BATCH_SIZE, validLeads.length)}, falling back to row-by-row insertion.`);
+                for (const lead of chunk) {
+                    try {
+                        const { sql, params } = buildBulkInsertSql(
+                            [lead], verticalId, subVerticalId, assignedTo, uploadedBy, batchId
+                        );
+                        const result = await query(sql, params);
+                        successCount += result.rowCount;
+                    } catch (singleErr) {
+                        errors.push({ row: lead.csvRowNum, reason: singleErr.message });
+                    }
+                }
             }
 
             const progress = Math.round(((i + chunk.length) / validLeads.length) * 100);

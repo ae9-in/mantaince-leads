@@ -1,4 +1,4 @@
-﻿/* eslint-disable i18next/no-literal-string */
+/* eslint-disable i18next/no-literal-string */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -692,7 +692,7 @@ export const FollowUpsPositivesPage = () => {
   const handleDownloadTemplate = async () => {
     if (!activeVertical) return;
     try {
-      const response = await axios.get(`/api/v1/leads/csv/template/${activeVertical._id}`);
+      const response = await axios.get(`/api/v1/leads/csv/template/${activeVertical._id}?leadType=POSITIVE`);
       const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');

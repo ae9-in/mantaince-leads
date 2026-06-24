@@ -23,6 +23,7 @@ import {
   CheckCircle2,
   X,
   Calendar,
+  ExternalLink,
 } from 'lucide-react';
 import axios from '../api/axios.js';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
@@ -35,10 +36,19 @@ import GeotagCapture from '../components/GeotagCapture.jsx';
 import VerticalSelectionBar from '../components/VerticalSelectionBar.jsx';
 
 const BASE_DYNAMIC_FIELDS = [
-  { key: 'nameBusiness', label: 'Name Business', type: 'text', defaultValue: '' },
   { key: 'date', label: 'Date', type: 'date', defaultValue: '' },
-  { key: 'deliveredLocation', label: 'Delivered Location (google maps location)', type: 'text', defaultValue: '' },
-  { key: 'deliveredLink', label: 'Delivered Link', type: 'url', defaultValue: '' },
+  { key: 'businessType', label: 'Business Type', type: 'text', defaultValue: '' },
+  { key: 'pointOfContact', label: 'Point of Contact (Name & Number)', type: 'text', defaultValue: '' },
+  { key: 'area', label: 'Area', type: 'text', defaultValue: '' },
+  { key: 'city', label: 'City', type: 'text', defaultValue: '' },
+  { key: 'deliveredLocation', label: 'Map Location Link / Address', type: 'text', defaultValue: '' },
+  { key: 'remarks', label: 'Remarks', type: 'text', defaultValue: '' },
+  { key: 'recording', label: 'Recording', type: 'text', defaultValue: '' },
+  { key: 'appointment', label: 'Appointment (Yes/No)', type: 'text', defaultValue: '' },
+  { key: 'appointmentDate', label: 'Appointment Date', type: 'date', defaultValue: '' },
+  { key: 'appointmentTimings', label: 'Appointment Timings', type: 'text', defaultValue: '' },
+  { key: 'requirement', label: 'Requirement/Order (If Any)', type: 'text', defaultValue: '' },
+  { key: 'notesToCosTeam', label: 'Notes to COS Team (If any)', type: 'text', defaultValue: '' },
 ];
 
 const BASE_DYNAMIC_FIELD_KEYS = new Set(BASE_DYNAMIC_FIELDS.map((field) => field.key));
@@ -648,7 +658,7 @@ export const LeadsPage = () => {
   const handleDownloadTemplate = async () => {
     if (!activeVertical) return;
     try {
-      const response = await axios.get(`/api/v1/leads/csv/template/${activeVertical._id}`);
+      const response = await axios.get(`/api/v1/leads/csv/template/${activeVertical._id}?leadType=CALL`);
       const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -795,32 +805,81 @@ export const LeadsPage = () => {
         ),
       },
       {
-        id: 'nameBusiness',
-        header: 'Name Business',
-        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'nameBusiness')),
-      },
-      {
         id: 'date',
         header: 'Date',
         cell: ({ row }) => formatDynamicValue('date', getLeadData(row.original, 'date')),
       },
       {
-        id: 'deliveredLocation',
-        header: 'Delivered Location (google maps location)',
-        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'deliveredLocation')),
+        id: 'businessType',
+        header: 'Business Type',
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'businessType')),
       },
       {
-        id: 'deliveredLink',
-        header: 'Delivered Link',
+        id: 'pointOfContact',
+        header: 'Point of Contact',
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'pointOfContact')),
+      },
+      {
+        id: 'area',
+        header: 'Area',
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'area')),
+      },
+      {
+        id: 'city',
+        header: 'City',
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'city')),
+      },
+      {
+        id: 'deliveredLocation',
+        header: 'Map Location Link / Address',
         cell: ({ row }) => {
-          const value = getLeadData(row.original, 'deliveredLink');
+          const value = getLeadData(row.original, 'deliveredLocation');
           if (!value) return '-';
-          return (
-            <a href={value} target="_blank" rel="noreferrer" className="text-[--accent] hover:underline">
-              Open
-            </a>
-          );
+          if (value.startsWith('http://') || value.startsWith('https://')) {
+            return (
+              <a href={value} target="_blank" rel="noreferrer" className="text-[--accent] hover:underline flex items-center gap-1">
+                <span>Location Link</span>
+                <ExternalLink size={10} />
+              </a>
+            );
+          }
+          return formatDynamicValue('text', value);
         },
+      },
+      {
+        id: 'remarks',
+        header: 'Remarks',
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'remarks')),
+      },
+      {
+        id: 'recording',
+        header: 'Recording',
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'recording')),
+      },
+      {
+        id: 'appointment',
+        header: 'Appointment (Yes/No)',
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'appointment')),
+      },
+      {
+        id: 'appointmentDate',
+        header: 'Appointment Date',
+        cell: ({ row }) => formatDynamicValue('date', getLeadData(row.original, 'appointmentDate')),
+      },
+      {
+        id: 'appointmentTimings',
+        header: 'Appointment Timings',
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'appointmentTimings')),
+      },
+      {
+        id: 'requirement',
+        header: 'Requirement/Order (If Any)',
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'requirement')),
+      },
+      {
+        id: 'notesToCosTeam',
+        header: 'Notes to COS Team',
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'notesToCosTeam')),
       },
       {
         accessorKey: 'status',

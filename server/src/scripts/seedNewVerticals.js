@@ -72,6 +72,13 @@ const newTaxonomy = [
         color: '#F9A825', // Yellow/Amber
         icon: 'BookOpen',
         subVerticals: ['Standard']
+    },
+    {
+        name: 'Talenty consulting',
+        description: 'Talenty consulting Vertical',
+        color: '#3F51B5', // Indigo
+        icon: 'Users',
+        subVerticals: ['Standard']
     }
 ];
 

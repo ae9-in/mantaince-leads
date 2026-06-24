@@ -794,7 +794,7 @@ export const LeadsPage = () => {
       { accessorKey: 'businessName', header: 'Business' },
       {
         accessorKey: 'assignee_name',
-        header: 'Employee Spoken',
+        header: 'Employee Name',
         cell: ({ row }) => (
           <div className="flex items-center gap-1.5">
             <div className="w-5 h-5 rounded bg-stone-100 flex items-center justify-center text-[8px] border border-stone-200 font-bold">
@@ -1104,7 +1104,7 @@ export const LeadsPage = () => {
               </select>
             </FilterInput>
 
-            <FilterInput label="Employee Spoken">
+            <FilterInput label="Employee Name">
               <select value={agentFilter} onChange={(event) => updateQueryParam('assignedTo', event.target.value)} className="w-full">
                 <option value="">All Agents</option>
                 {agents.map((agent) => (
@@ -1478,7 +1478,7 @@ export const LeadsPage = () => {
                     </FormField>
                   )}
 
-                  <FormField label="Employee Spoken">
+                  <FormField label="Employee Name">
                     <select
                       value={leadFormAssignedTo}
                       onChange={(event) => setLeadFormAssignedTo(event.target.value)}

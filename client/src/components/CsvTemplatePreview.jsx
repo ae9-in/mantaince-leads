@@ -34,7 +34,7 @@ export const CsvTemplatePreview = ({ verticalId }) => {
     'Name',
     'Number',
     'Business',
-    'Employee Spoken',
+    'Employee Name',
     'Lead Type',
     'Status',
     'Name Business',

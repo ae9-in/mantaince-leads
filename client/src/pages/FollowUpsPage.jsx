@@ -293,7 +293,7 @@ export const FollowUpsPage = () => {
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Employee Spoken</label>
+                  <label className="text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Employee Name</label>
                   <EmployeeDropdown 
                     employees={agents.map(a => ({ id: a.id || a._id, name: a.name, role: a.role_name || a.role }))}
                     value={agentId}
@@ -653,7 +653,7 @@ const FollowUpCard = ({ item, onComplete, isAdmin }) => {
         {/* Right: metadata */}
         <div className="lg:w-1/6 space-y-4 text-[10px] border-l border-stone-50 pl-6 hidden lg:block">
           <div>
-            <span className="block font-black text-[--text-muted] uppercase tracking-widest mb-1">Employee Spoken</span>
+            <span className="block font-black text-[--text-muted] uppercase tracking-widest mb-1">Employee Name</span>
             <div className="flex items-center gap-1.5 font-bold text-[--text-primary]">
               <div className="w-5 h-5 rounded-md bg-stone-100 flex items-center justify-center text-[8px] border border-stone-200">
                 {item.assigned_to_name?.slice(0,1)}

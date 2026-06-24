@@ -274,8 +274,8 @@ export const processCsvJob = async (job) => {
 
             // Legacy / backward compat fields
             dataMap['nameBusiness'] = row['name business'] || row['namebusiness'] || '';
-            const empSpokenRaw = row['employee name'] || row['employee spoken'] || row['employee'] || row['spoken'] || '';
-            dataMap['employeeSpoken'] = empSpokenRaw;
+            const empSpokenRaw = row['employee name'] || '';
+            dataMap['employeeName'] = empSpokenRaw;
             dataMap['convertedStatus'] = row['converted status'] || row['converted'] || '';
 
             const empSpokenName = empSpokenRaw.toLowerCase().trim();

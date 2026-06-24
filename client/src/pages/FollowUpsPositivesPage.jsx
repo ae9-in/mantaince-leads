@@ -871,7 +871,7 @@ export const FollowUpsPositivesPage = () => {
       { accessorKey: 'businessName', header: 'Business' },
       {
         accessorKey: 'assignee_name',
-        header: 'Employee Spoken',
+        header: 'Employee Name',
         cell: ({ row }) => (
           <div className="flex items-center gap-1.5">
             <div className="w-5 h-5 rounded bg-stone-100 flex items-center justify-center text-[8px] border border-stone-200 font-bold">
@@ -1134,7 +1134,7 @@ export const FollowUpsPositivesPage = () => {
                 onClick={() => setBulkAssignModal(true)}
                 className="px-3 py-1.5 border border-[--border-strong] rounded-md text-xs font-bold hover:bg-stone-100 bg-white"
               >
-                Assign Spoken
+                Assign Employee
               </button>
               <button
                 type="button"
@@ -1220,7 +1220,7 @@ export const FollowUpsPositivesPage = () => {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <span className="text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Spoken Employee</span>
+            <span className="text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Employee Name</span>
             <EmployeeDropdown 
               employees={agents.map(a => ({ id: a.id || a._id, name: a.name, role: a.role_name || a.role }))}
               value={agentFilter}
@@ -1579,10 +1579,10 @@ export const FollowUpsPositivesPage = () => {
                   </div>
                 </div>
 
-                {/* Row 3: Employee Spoken + Status */}
+                {/* Row 3: Employee Name + Status */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Employee Spoken</span>
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Employee Name</span>
                     <select
                       value={leadFormAssignedTo}
                       onChange={(e) => setLeadFormAssignedTo(e.target.value)}
@@ -1874,7 +1874,7 @@ export const FollowUpsPositivesPage = () => {
 
               <div className="flex flex-col gap-1.5">
                 <span className="text-[10px] font-black uppercase text-[--text-secondary]">
-                  4. Default Assign Spoken Employee (Optional)
+                  4. Default Assign Employee Name (Optional)
                 </span>
                 <select
                   value={assignTarget}
@@ -1969,7 +1969,7 @@ export const FollowUpsPositivesPage = () => {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] p-4">
           <div className="bg-white rounded-xl max-w-sm w-full p-5 space-y-4 shadow-xl">
             <div className="border-b border-stone-200 pb-2.5">
-              <h4 className="text-sm font-black uppercase text-[--text-primary]">Bulk Assign Spoken Employee</h4>
+              <h4 className="text-sm font-black uppercase text-[--text-primary]">Bulk Assign Employee Name</h4>
             </div>
             <div className="space-y-3">
               <span className="text-[10px] font-black uppercase text-stone-500">Select Employee</span>

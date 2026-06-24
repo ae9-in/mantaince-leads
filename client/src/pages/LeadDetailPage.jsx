@@ -500,7 +500,7 @@ export const LeadDetailPage = () => {
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-[--text-secondary] uppercase">Employee Spoken</label>
+                <label className="text-xs font-bold text-[--text-secondary] uppercase">Employee Name</label>
                 {editMode ? (
                   <select {...register('assignedTo')}>
                     <option value="">-- Unassigned --</option>
@@ -892,7 +892,7 @@ export const LeadDetailPage = () => {
                 </div>
 
                 <div className="flex flex-col gap-1 text-[11px]">
-                  <label className="font-bold text-[--text-secondary]">Employee Spoken</label>
+                  <label className="font-bold text-[--text-secondary]">Employee Name</label>
                   <select
                     required
                     value={scheduleAgentId}

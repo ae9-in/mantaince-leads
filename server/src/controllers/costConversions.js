@@ -709,7 +709,7 @@ export const exportCostConversionsCsv = async (req, res) => {
         const leadsRes = await query(sql, params);
 
         const leads     = leadsRes.rows;
-        const csvHeader = 'ID,Name,Phone,Business Name,Status,Sub-Vertical,Employee Spoken,Source,Created At\n';
+        const csvHeader = 'ID,Name,Phone,Business Name,Status,Sub-Vertical,Employee Name,Source,Created At\n';
         const csvRows   = leads.map(l =>
             `"${l.id}","${l.name}","${l.phone}","${l.business_name}","${l.status}","${l.sub_vertical_name || ''}","${l.assignee_name || ''}","${l.source}","${l.created_at.toISOString()}"`
         ).join('\n');

@@ -276,61 +276,53 @@ export const createCostConversion = async (req, res) => {
         const gAcc = geotagAccuracy ? parseFloat(geotagAccuracy) : null;
         const gCap = geotagCapturedAt ? new Date(geotagCapturedAt) : null;
 
-        if (phone) {
-            leadRes = await query(`
-                WITH dedup AS (
-                    SELECT id FROM cost_conversions
-                    WHERE phone = $1 AND vertical_id = $2 AND is_deleted = false
-                    LIMIT 1
-                )
-                INSERT INTO cost_conversions
-                    (id, vertical_id, sub_vertical_id, assigned_to, uploaded_by, name, phone, business_name, data, status,
-                     lead_type, geotag_lat, geotag_lng, geotag_accuracy, geotag_photo_key, geotag_address, geotag_captured_at, stage_id)
-                SELECT $3, $2, $4, $5, $6, $7, $1, $8, $9, $18,
-                       $10, $11, $12, $13, $14, $15, $16, $17
-                WHERE NOT EXISTS (SELECT 1 FROM dedup)
-                RETURNING *
-            `, [
-                phone, verticalId,
-                leadId,
-                (subVerticalId && isValidUUID(subVerticalId)) ? subVerticalId : null,
-                (assignedTo    && isValidUUID(assignedTo))    ? assignedTo    : null,
-                req.user.sub,
-                name, businessName || '', JSON.stringify(data),
-                leadType || 'CALL',
-                gLat, gLng, gAcc,
-                geotagPhotoKey || null,
-                geotagAddress || null,
-                gCap,
-                (stageId       && isValidUUID(stageId))       ? stageId       : null,
-                status || 'new'
-            ]);
+        if (!name || !name.trim()) {
+            return res.status(400).json({ success: false, error: 'Business / Person / Shop / Company name is mandatory' });
+        }
+        if (!phone || !phone.toString().trim()) {
+            return res.status(400).json({ success: false, error: 'Contact number is mandatory' });
+        }
+        const sanitizedPhone = phone.toString().replace(/[^\d+]/g, '').trim();
+        if (!sanitizedPhone) {
+            return res.status(400).json({ success: false, error: 'Contact number is mandatory' });
+        }
 
-            if (leadRes.rows.length === 0) {
-                return res.status(409).json({ success: false, error: 'Cost/Conversion with this phone number already exists' });
-            }
-        } else {
-            leadRes = await query(`
-                INSERT INTO cost_conversions
-                    (id, vertical_id, sub_vertical_id, assigned_to, uploaded_by, name, phone, business_name, data, status,
-                     lead_type, geotag_lat, geotag_lng, geotag_accuracy, geotag_photo_key, geotag_address, geotag_captured_at, stage_id)
-                VALUES ($1, $2, $3, $4, $5, $6, '', $7, $8, $17,
-                        $9, $10, $11, $12, $13, $14, $15, $16)
-                RETURNING *
-            `, [
-                leadId, verticalId,
-                (subVerticalId && isValidUUID(subVerticalId)) ? subVerticalId : null,
-                (assignedTo    && isValidUUID(assignedTo))    ? assignedTo    : null,
-                req.user.sub,
-                name, businessName || '', JSON.stringify(data),
-                leadType || 'CALL',
-                gLat, gLng, gAcc,
-                geotagPhotoKey || null,
-                geotagAddress || null,
-                gCap,
-                (stageId       && isValidUUID(stageId))       ? stageId       : null,
-                status || 'new'
-            ]);
+        const employeeName = data.employeeName || '';
+        if (!assignedTo && !employeeName.trim()) {
+            return res.status(400).json({ success: false, error: 'Employee name is mandatory' });
+        }
+
+        leadRes = await query(`
+            WITH dedup AS (
+                SELECT id FROM cost_conversions
+                WHERE phone = $1 AND vertical_id = $2 AND is_deleted = false
+                LIMIT 1
+            )
+            INSERT INTO cost_conversions
+                (id, vertical_id, sub_vertical_id, assigned_to, uploaded_by, name, phone, business_name, data, status,
+                 lead_type, geotag_lat, geotag_lng, geotag_accuracy, geotag_photo_key, geotag_address, geotag_captured_at, stage_id)
+            SELECT $3, $2, $4, $5, $6, $7, $1, $8, $9, $18,
+                   $10, $11, $12, $13, $14, $15, $16, $17
+            WHERE NOT EXISTS (SELECT 1 FROM dedup)
+            RETURNING *
+        `, [
+            sanitizedPhone, verticalId,
+            leadId,
+            (subVerticalId && isValidUUID(subVerticalId)) ? subVerticalId : null,
+            (assignedTo    && isValidUUID(assignedTo))    ? assignedTo    : null,
+            req.user.sub,
+            name, businessName || '', JSON.stringify(data),
+            leadType || 'CALL',
+            gLat, gLng, gAcc,
+            geotagPhotoKey || null,
+            geotagAddress || null,
+            gCap,
+            (stageId       && isValidUUID(stageId))       ? stageId       : null,
+            status || 'new'
+        ]);
+
+        if (leadRes.rows.length === 0) {
+            return res.status(409).json({ success: false, error: 'Cost/Conversion with this phone number already exists' });
         }
 
         const lead = leadRes.rows[0];
@@ -466,6 +458,27 @@ export const updateCostConversion = async (req, res) => {
         }
         if (req.user.role === 'agent' && lead.assigned_to !== req.user.sub) {
             return res.status(403).json({ success: false, error: 'Access forbidden: this Cost/Conversion is not assigned to you' });
+        }
+
+        if (updates.name !== undefined && (!updates.name || !updates.name.trim())) {
+            return res.status(400).json({ success: false, error: 'Business / Person / Shop / Company name is mandatory' });
+        }
+        if (updates.phone !== undefined) {
+            const sanitizedPhone = updates.phone.toString().replace(/[^\d+]/g, '').trim();
+            if (!sanitizedPhone) {
+                return res.status(400).json({ success: false, error: 'Contact number is mandatory' });
+            }
+            // Check for duplicates
+            const existing = await query(
+                `SELECT id FROM cost_conversions 
+                WHERE phone = $1 AND vertical_id = $2 AND id <> $3 AND is_deleted = false
+                LIMIT 1`,
+                [sanitizedPhone, lead.vertical_id, id]
+            );
+            if (existing.rowCount > 0) {
+                return res.status(409).json({ success: false, error: 'Another lead with this phone number already exists' });
+            }
+            updates.phone = sanitizedPhone;
         }
 
         const fields = [
@@ -716,9 +729,10 @@ export const exportCostConversionsCsv = async (req, res) => {
 
         let csvHeader = '';
         let csvRows = '';
+        const isPositive = leadType === 'POSITIVE';
 
-        if (leadType === 'POSITIVE') {
-            csvHeader = 'DATE,EMPLOYEE NAME,BUSINESS TYPE,BUSINESS / PERSON / SHOP / COMPANY NAME,AREA,CITY,CONTACT,MAP LOCATION LINK / ADDRESS,REQUIREMENT,REMARKS,FOLLOW UP REQUIRE (YES/NO),FOLLOW UP DATE,FOLLOW UP REMARKS,Status\n';
+        if (isPositive) {
+            csvHeader = 'DATE,EMPLOYEE NAME,BUSINESS TYPE,BUSINESS / PERSON / SHOP / COMPANY NAME,AREA,CITY,CONTACT NUMBER,POINT OF CONTACT,REMARKS,RECORDINGS,FOLLOW-UP REQUIRED,FOLLOW-UPS,FOLLOW-UP DATES,FOLLOW-UP REMARKS,REQUIREMENT IF ANY,A NOTES TO THE COS TEAM ONLY,Status\n';
             csvRows = leads.map(l => {
                 const d = l.data || {};
                 const dateVal = d.date || (l.created_at ? l.created_at.toISOString().split('T')[0] : '');
@@ -728,30 +742,40 @@ export const exportCostConversionsCsv = async (req, res) => {
                 const area = d.area || '';
                 const city = d.city || '';
                 const contact = l.phone || d.phone || '';
-                const mapLink = d.deliveredLocation || '';
-                const req = d.requirement || '';
-                const rem = d.remarks || '';
-                const fReq = d.requireFollowUp || '';
-                const fDate = d.followUpDate || '';
-                const fRem = d.followUpRemarks || '';
-                
-                return `"${escapeCsvVal(dateVal)}","${escapeCsvVal(empName)}","${escapeCsvVal(bType)}","${escapeCsvVal(name)}","${escapeCsvVal(area)}","${escapeCsvVal(city)}","${escapeCsvVal(contact)}","${escapeCsvVal(mapLink)}","${escapeCsvVal(req)}","${escapeCsvVal(rem)}","${escapeCsvVal(fReq)}","${escapeCsvVal(fDate)}","${escapeCsvVal(fRem)}","${escapeCsvVal(l.status)}"`;
+                const poc = d.pointOfContact || '';
+                const remarks = d.remarks || '';
+                const recordings = d.recordings || '';
+                const followUpRequired = d.followUpRequired || '';
+                const followUps = d.followUps || '';
+                const followUpDates = d.followUpDates || '';
+                const followUpRemarks = d.followUpRemarks || '';
+                const reqVal = d.requirement || '';
+                const notes = d.notes || '';
+
+                return `"${escapeCsvVal(dateVal)}","${escapeCsvVal(empName)}","${escapeCsvVal(bType)}","${escapeCsvVal(name)}","${escapeCsvVal(area)}","${escapeCsvVal(city)}","${escapeCsvVal(contact)}","${escapeCsvVal(poc)}","${escapeCsvVal(remarks)}","${escapeCsvVal(recordings)}","${escapeCsvVal(followUpRequired)}","${escapeCsvVal(followUps)}","${escapeCsvVal(followUpDates)}","${escapeCsvVal(followUpRemarks)}","${escapeCsvVal(reqVal)}","${escapeCsvVal(notes)}","${escapeCsvVal(l.status)}"`;
             }).join('\n');
         } else {
-            csvHeader = 'DATE,EMPLOYEE NAME,BUSINESS TYPE,BUSINESS / PERSON / SHOP / COMPANY NAME,AREA,CITY,CONTACT,MAP LOCATION LINK / ADDRESS,REQUIREMENT,Status\n';
+            csvHeader = 'DATE,EMPLOYEE NAME,BUSINESS TYPE,BUSINESS / PERSON / SHOP / COMPANY NAME,CONTACT NUMBER,POINT OF CONTACT,AREA,CITY,LINK ADDRESS,REMARKS,RECORDINGS,APPOINTMENT TYPE (YES OR NO),APPOINTMENT DATE,APPOINTMENT TIME,REQUIREMENT ORDER IF ANY,NOTES TO THE COS IF ANY,Status\n';
             csvRows = leads.map(l => {
                 const d = l.data || {};
                 const dateVal = d.date || (l.created_at ? l.created_at.toISOString().split('T')[0] : '');
                 const empName = l.assignee_name || d.employeeName || '';
                 const bType = d.businessType || '';
                 const name = l.name || l.business_name || d.businessName || '';
+                const contact = l.phone || d.phone || '';
+                const poc = d.pointOfContact || '';
                 const area = d.area || '';
                 const city = d.city || '';
-                const contact = l.phone || d.phone || '';
                 const mapLink = d.deliveredLocation || '';
-                const req = d.requirement || '';
-                
-                return `"${escapeCsvVal(dateVal)}","${escapeCsvVal(empName)}","${escapeCsvVal(bType)}","${escapeCsvVal(name)}","${escapeCsvVal(area)}","${escapeCsvVal(city)}","${escapeCsvVal(contact)}","${escapeCsvVal(mapLink)}","${escapeCsvVal(req)}","${escapeCsvVal(l.status)}"`;
+                const rem = d.remarks || '';
+                const rec = d.recordings || '';
+                const appTime = d.appointmentTime || '';
+                const appType = d.appointmentType || '';
+                const appDate = d.appointmentDate || '';
+                const reqVal = d.requirement || '';
+                const notes = d.notes || '';
+
+                return `"${escapeCsvVal(dateVal)}","${escapeCsvVal(empName)}","${escapeCsvVal(bType)}","${escapeCsvVal(name)}","${escapeCsvVal(contact)}","${escapeCsvVal(poc)}","${escapeCsvVal(area)}","${escapeCsvVal(city)}","${escapeCsvVal(mapLink)}","${escapeCsvVal(rem)}","${escapeCsvVal(rec)}","${escapeCsvVal(appType)}","${escapeCsvVal(appDate)}","${escapeCsvVal(appTime)}","${escapeCsvVal(reqVal)}","${escapeCsvVal(notes)}","${escapeCsvVal(l.status)}"`;
             }).join('\n');
         }
 
@@ -845,7 +869,7 @@ export const createCostConversionBulk = async (req, res) => {
 
         const CostConversionSchema = z.object({
             name: z.string().min(1, 'Name is required').max(255),
-            phone: z.string().optional().nullable().transform(val => val || ''),
+            phone: z.string().min(1, 'Contact number is required').transform(val => val.replace(/[^\d+]/g, '').trim()).refine(val => val.length > 0, 'Contact number cannot be empty'),
             businessName: z.string().optional().nullable().transform(val => val || ''),
             subVerticalId: z.string().uuid().optional().nullable(),
             assignedTo: z.string().uuid().optional().nullable(),

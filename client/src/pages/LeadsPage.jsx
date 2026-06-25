@@ -40,11 +40,29 @@ const BASE_DYNAMIC_FIELDS = [
   { key: 'businessType', label: 'Business Type', type: 'text', defaultValue: '' },
   { key: 'area', label: 'Area', type: 'text', defaultValue: '' },
   { key: 'city', label: 'City', type: 'text', defaultValue: '' },
-  { key: 'deliveredLocation', label: 'Map Location Link / Address', type: 'text', defaultValue: '' },
-  { key: 'requirement', label: 'Requirement', type: 'text', defaultValue: '' },
+  { key: 'pointOfContactName', label: 'Point of Contact Name', type: 'text', defaultValue: '' },
+  { key: 'pointOfContactNumber', label: 'Point of Contact Number', type: 'text', defaultValue: '' },
+  { key: 'deliveredLocation', label: 'Link Address', type: 'text', defaultValue: '' },
+  { key: 'remarks', label: 'Remarks', type: 'text', defaultValue: '' },
+  { key: 'recordings', label: 'Recordings', type: 'text', defaultValue: '' },
+  { key: 'appointmentType', label: 'Appointment type (yes or no)', type: 'select', defaultValue: '' },
+  { key: 'appointmentDate', label: 'Appointment date', type: 'date', defaultValue: '' },
+  { key: 'appointmentTime', label: 'Appointment time', type: 'text', defaultValue: '' },
+  { key: 'requirement', label: 'Requirement order if any', type: 'text', defaultValue: '' },
+  { key: 'notes', label: 'Notes to the cos if any', type: 'text', defaultValue: '' },
 ];
 
-const BASE_DYNAMIC_FIELD_KEYS = new Set(BASE_DYNAMIC_FIELDS.map((field) => field.key));
+const BASE_DYNAMIC_FIELD_KEYS = new Set([
+  ...BASE_DYNAMIC_FIELDS.map((field) => field.key),
+  'point_of_contact',
+  'point_of_contact_name',
+  'point_of_contact_number',
+  'pointofcontact',
+  'pointofcontactname',
+  'pointofcontactnumber',
+  'products',
+  'product'
+]);
 
 const getLeadData = (lead, key, fallback = '') => {
   if (key === '__proto__' || key === 'constructor' || key === 'prototype') return fallback;
@@ -194,6 +212,7 @@ export const LeadsPage = () => {
   const [leadFormPhone, setLeadFormPhone] = useState('');
   const [leadFormBusiness, setLeadFormBusiness] = useState('');
   const [leadFormAssignedTo, setLeadFormAssignedTo] = useState('');
+  const [employeeNameInput, setEmployeeNameInput] = useState('');
   const [leadFormDynamic, setLeadFormDynamic] = useState(createBaseDynamicDefaults());
   const [formErrors, setFormErrors] = useState([]);
   const [leadFormLeadType, setLeadFormLeadType] = useState('CALL');
@@ -208,6 +227,7 @@ export const LeadsPage = () => {
   const [uploadStatus, setUploadStatus] = useState('idle'); // 'idle' | 'uploading' | 'processing' | 'done' | 'failed'
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadResult, setUploadResult] = useState(null); // { successCount, failedCount, duplicateCount, errors }
+  const [importLeadType, setImportLeadType] = useState('CALL');
   const [leadFormSubVerticalId, setLeadFormSubVerticalId] = useState('');
 
   const isAdmin = user?.role === 'super_admin' || user?.role === 'vertical_admin';
@@ -400,6 +420,7 @@ export const LeadsPage = () => {
     setLeadFormBusiness('');
     setLeadFormSubVerticalId('');
     setLeadFormAssignedTo('');
+    setEmployeeNameInput('');
     setLeadFormLeadType('CALL');
     setLeadFormGeotagCoords(null);
     setLeadFormGeotagFile(null);
@@ -415,7 +436,10 @@ export const LeadsPage = () => {
     setLeadFormPhone(lead.phone || '');
     setLeadFormBusiness(lead.businessName || lead.business_name || '');
     setLeadFormSubVerticalId(lead.subVerticalId?._id || lead.subVerticalId || lead.sub_vertical_id || '');
-    setLeadFormAssignedTo(lead.assigned_to || lead.assignedTo || '');
+    const assignedId = lead.assigned_to || lead.assignedTo || '';
+    setLeadFormAssignedTo(assignedId);
+    const matchedAgent = agents.find(ag => ag.id === assignedId || ag._id === assignedId);
+    setEmployeeNameInput(matchedAgent ? matchedAgent.name : (lead.data?.employeeName || ''));
     setLeadFormLeadType(lead.lead_type || lead.leadType || 'CALL');
     setLeadFormGeotagCoords(
       lead.geotag_lat || lead.geotagLat
@@ -442,7 +466,10 @@ export const LeadsPage = () => {
       businessName: leadFormBusiness,
       verticalId: activeVertical._id,
       subVerticalId: leadFormSubVerticalId || subVerticalFilter || null,
-      data: leadFormDynamic,
+      data: {
+        ...leadFormDynamic,
+        employeeName: employeeNameInput || '',
+      },
       assignedTo: leadFormAssignedTo || null,
       leadType: leadFormLeadType,
       status: leadFormStatus,
@@ -476,6 +503,7 @@ export const LeadsPage = () => {
         lead_type: payload.leadType,
         data: { ...l.data, ...payload.data },
         assigned_to: payload.assignedTo,
+        assignee_name: employeeNameInput || '',
         _optimistic: true
       } : l);
       setLeads(updatedLeads);
@@ -493,6 +521,7 @@ export const LeadsPage = () => {
         vertical_id: payload.verticalId,
         sub_vertical_id: payload.subVerticalId,
         assigned_to: payload.assignedTo,
+        assignee_name: employeeNameInput || '',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         _optimistic: true
@@ -679,6 +708,7 @@ export const LeadsPage = () => {
     formData.append('file', selectedFile);
     formData.append('verticalId', activeVertical._id);
     formData.append('subVerticalId', leadFormSubVerticalId || subVerticalFilter || '');
+    formData.append('leadType', importLeadType);
     if (assignTarget) {
       formData.append('assignedTo', assignTarget);
     }
@@ -744,6 +774,7 @@ export const LeadsPage = () => {
     setCsvImportModalOpen(false);
     setSelectedFile(null);
     setAssignTarget('');
+    setImportLeadType('CALL');
     setUploadStatus('idle');
     setUploadProgress(0);
     setUploadResult(null);
@@ -781,9 +812,9 @@ export const LeadsPage = () => {
         cell: ({ row }) => (
           <div className="flex items-center gap-1.5">
             <div className="w-5 h-5 rounded bg-stone-100 flex items-center justify-center text-[8px] border border-stone-200 font-bold">
-              {row.original.assignee_name?.slice(0, 1) || '?'}
+              {(row.original.assignee_name || row.original.data?.employeeName)?.slice(0, 1) || '?'}
             </div>
-            <span>{row.original.assignee_name || 'Unassigned'}</span>
+            <span>{row.original.assignee_name || row.original.data?.employeeName || 'Unassigned'}</span>
           </div>
         ),
       },
@@ -1234,7 +1265,7 @@ export const LeadsPage = () => {
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <FilterInput label="Select Target Sub-Vertical *">
                     <select 
                       required
@@ -1249,16 +1280,18 @@ export const LeadsPage = () => {
                     </select>
                   </FilterInput>
 
-                  {isAdmin && (
-                    <FilterInput label="Optionally assign to operator">
-                      <select value={assignTarget} onChange={(e) => setAssignTarget(e.target.value)} className="w-full">
-                        <option value="">-- Leave Unassigned --</option>
-                        {agents.map((agent) => (
-                          <option key={agent.id} value={agent.id}>{agent.name}</option>
-                        ))}
-                      </select>
-                    </FilterInput>
-                  )}
+                  <FilterInput label="Which type of leads">
+                    <select 
+                      value={importLeadType} 
+                      onChange={(e) => setImportLeadType(e.target.value)} 
+                      className="w-full font-semibold"
+                    >
+                      <option value="CALL">Calls</option>
+                      <option value="FIELD">Field Visit</option>
+                    </select>
+                  </FilterInput>
+
+
                 </div>
 
                 <div className="flex items-center justify-between pt-2">
@@ -1420,16 +1453,25 @@ export const LeadsPage = () => {
                     />
                   </FormField>
 
-                  <FormField label="Employee Name">
-                    <select
-                      value={leadFormAssignedTo}
-                      onChange={(event) => setLeadFormAssignedTo(event.target.value)}
-                    >
-                      <option value="">-- Unassigned --</option>
-                      {agents.map((agent) => (
-                        <option key={agent.id} value={agent.id}>{agent.name} ({agent.email})</option>
+                  <FormField label="Employee Name *">
+                    <input
+                      type="text"
+                      required
+                      list="leads-agents-list"
+                      value={employeeNameInput}
+                      onChange={(event) => {
+                        const val = event.target.value;
+                        setEmployeeNameInput(val);
+                        const matched = agents.find(ag => ag.name.toLowerCase().trim() === val.toLowerCase().trim());
+                        setLeadFormAssignedTo(matched ? matched.id : '');
+                      }}
+                      placeholder="Type or select employee..."
+                    />
+                    <datalist id="leads-agents-list">
+                      {agents.map(ag => (
+                        <option key={ag.id} value={ag.name} />
                       ))}
-                    </select>
+                    </datalist>
                   </FormField>
 
                   <FormField label="Business Type">
@@ -1451,6 +1493,21 @@ export const LeadsPage = () => {
                     />
                   </FormField>
 
+                  <FormField label="Contact Number *">
+                    <input
+                      required
+                      value={leadFormPhone}
+                      onChange={(event) => setLeadFormPhone(event.target.value)}
+                    />
+                  </FormField>
+
+                  <FormField label="Point of Contact">
+                    <input
+                      type="text"
+                      value={getDynamicValue(leadFormDynamic, 'pointOfContact')}
+                      onChange={(event) => handleDynamicChange('pointOfContact', event.target.value)}
+                    />
+                  </FormField>
                   <FormField label="Area">
                     <input
                       type="text"
@@ -1467,15 +1524,7 @@ export const LeadsPage = () => {
                     />
                   </FormField>
 
-                  <FormField label="Contact *">
-                    <input
-                      required
-                      value={leadFormPhone}
-                      onChange={(event) => setLeadFormPhone(event.target.value)}
-                    />
-                  </FormField>
-
-                  <FormField label="Map Location Link / Address">
+                  <FormField label="Link Address">
                     <input
                       type="text"
                       value={getDynamicValue(leadFormDynamic, 'deliveredLocation')}
@@ -1483,7 +1532,50 @@ export const LeadsPage = () => {
                     />
                   </FormField>
 
-                  <FormField label="Requirement">
+                  <FormField label="Remarks">
+                    <input
+                      type="text"
+                      value={getDynamicValue(leadFormDynamic, 'remarks')}
+                      onChange={(event) => handleDynamicChange('remarks', event.target.value)}
+                    />
+                  </FormField>
+
+                  <FormField label="Recordings">
+                    <input
+                      type="text"
+                      value={getDynamicValue(leadFormDynamic, 'recordings')}
+                      onChange={(event) => handleDynamicChange('recordings', event.target.value)}
+                    />
+                  </FormField>
+
+                  <FormField label="Appointment type (yes or no)">
+                    <select
+                      value={getDynamicValue(leadFormDynamic, 'appointmentType')}
+                      onChange={(event) => handleDynamicChange('appointmentType', event.target.value)}
+                    >
+                      <option value="">-- Select --</option>
+                      <option value="YES">YES</option>
+                      <option value="NO">NO</option>
+                    </select>
+                  </FormField>
+
+                  <FormField label="Appointment date">
+                    <input
+                      type="date"
+                      value={getDynamicValue(leadFormDynamic, 'appointmentDate')}
+                      onChange={(event) => handleDynamicChange('appointmentDate', event.target.value)}
+                    />
+                  </FormField>
+
+                  <FormField label="Appointment time">
+                    <input
+                      type="text"
+                      value={getDynamicValue(leadFormDynamic, 'appointmentTime')}
+                      onChange={(event) => handleDynamicChange('appointmentTime', event.target.value)}
+                    />
+                  </FormField>
+
+                  <FormField label="Requirement order if any">
                     <input
                       type="text"
                       value={getDynamicValue(leadFormDynamic, 'requirement')}
@@ -1491,6 +1583,28 @@ export const LeadsPage = () => {
                     />
                   </FormField>
 
+                  <FormField label="Notes to the cos if any">
+                    <input
+                      type="text"
+                      value={getDynamicValue(leadFormDynamic, 'notes')}
+                      onChange={(event) => handleDynamicChange('notes', event.target.value)}
+                    />
+                  </FormField>
+
+                  {leadFormLeadType === 'FIELD' && (
+                    <div className="col-span-1 md:col-span-2 xl:col-span-3">
+                      <GeotagCapture
+                        leadType="FIELD_VISIT"
+                        onChange={(coords, file) => {
+                          if (coords) setLeadFormGeotagCoords(coords);
+                          if (file) setLeadFormGeotagFile(file);
+                        }}
+                      />
+                    </div>
+                  )}
+                </FormSection>
+
+                <FormSection title="Assigning">
                   {!subVerticalFilter && (
                     <FormField label="Sub-Vertical">
                       <select
@@ -1520,29 +1634,6 @@ export const LeadsPage = () => {
                       <option value="FIELD">Field Visit</option>
                     </select>
                   </FormField>
-
-                  <FormField label="Status">
-                    <select
-                      value={leadFormStatus}
-                      onChange={(event) => setLeadFormStatus(event.target.value)}
-                    >
-                      {STATUS_OPTIONS.map((status) => (
-                        <option key={status.value} value={status.value}>{status.label}</option>
-                      ))}
-                    </select>
-                  </FormField>
-
-                  {leadFormLeadType === 'FIELD' && (
-                    <div className="col-span-1 md:col-span-2 xl:col-span-3">
-                      <GeotagCapture
-                        leadType="FIELD_VISIT"
-                        onChange={(coords, file) => {
-                          if (coords) setLeadFormGeotagCoords(coords);
-                          if (file) setLeadFormGeotagFile(file);
-                        }}
-                      />
-                    </div>
-                  )}
                 </FormSection>
 
                 {customConfigs.length > 0 && (

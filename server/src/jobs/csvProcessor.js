@@ -12,6 +12,7 @@ const BATCH_SIZE = 500; // Rows per bulk INSERT — balances memory and round-tr
 const sanitizeFormula = (val) => {
     if (val === undefined || val === null) return '';
     const str = val.toString().trim();
+    if (/^[+\-][\d\s()\-.]+$/.test(str)) return str; // Allow phone/numeric formats
     if (/^[=+\-@\t\r]/.test(str)) return ''; // Neutralize CSV injection
     return str;
 };
@@ -63,7 +64,7 @@ function buildBulkInsertSql(rows, verticalId, subVerticalId, defaultAssignedTo, 
         params.push(
             crypto.randomUUID(),
             verticalId,
-            subVerticalId || null,
+            row.subVerticalId || subVerticalId || null,
             row.assignedTo || defaultAssignedTo || null,
             uploadedBy,
             row.name,
@@ -165,6 +166,7 @@ export const processCsvJob = async (job) => {
         );
         const agentMap = new Map(agentsRes.rows.map(a => [a.name.toLowerCase().trim(), a.id]));
 
+        const normalizedRows = [];
         const csvPhones = [];
         for (const rawRow of rows) {
             const row = {};
@@ -175,10 +177,12 @@ export const processCsvJob = async (job) => {
                          .replace(/\s*\/\s*/g, '/')
                          .replace(/\s+/g, ' ');
                 if (key !== '__proto__' && key !== 'constructor' && key !== 'prototype') {
-                    row[key] = rawRow[k];
+                    row[key] = sanitizeFormula(rawRow[k]);
                 }
             }
-            const rawPhone = sanitizePhone(row['contact no'] || row['contact'] || row['number'] || row['phone'] || row['mobile'] || '');
+            normalizedRows.push({ row, original: rawRow });
+            
+            const rawPhone = sanitizePhone(row['contact number'] || row['contact'] || row['contact no'] || row['number'] || row['phone'] || row['mobile'] || '');
             if (rawPhone) {
                 csvPhones.push(rawPhone);
             }
@@ -196,27 +200,52 @@ export const processCsvJob = async (job) => {
         const phoneSet = new Set(existingPhones);
 
         let rowNum = 0;
-        for (const rawRow of rows) {
+        for (const { row, original: rawRow } of normalizedRows) {
             rowNum++;
 
-            const row = {};
-            for (const k of Object.keys(rawRow)) {
-                let key = k.toLowerCase().trim();
-                // Normalize newlines, slashes with spaces, and multiple spaces
-                key = key.replace(/\r?\n/g, ' ')
-                         .replace(/\s*\/\s*/g, '/')
-                         .replace(/\s+/g, ' ');
-                if (key !== '__proto__' && key !== 'constructor' && key !== 'prototype') {
-                    row[key] = sanitizeFormula(rawRow[k]);
-                }
-            }
-
-            const rawPhone    = sanitizePhone(row['contact'] || row['contact no'] || row['number'] || row['phone'] || row['mobile'] || '');
-            const rawName     = row['business/person/shop/company name'] || row['business / person / shop / company name'] || row['name'] || '';
-            const rawBusiness = row['business/person/shop/company name'] || row['business / person / shop / company name'] || row['business'] || row['business name'] || '';
+            const rawPhone    = sanitizePhone(row['contact number'] || row['contact'] || row['contact no'] || row['number'] || row['phone'] || row['mobile'] || '');
+            const rawName     = row['business/person/shop/company name'] || row['business person, shop, and company name'] || row['name'] || '';
+            const rawBusiness = row['business/person/shop/company name'] || row['business person, shop, and company name'] || row['business'] || row['business name'] || '';
 
             if (!rawPhone) {
-                errors.push({ row: rowNum, reason: 'Missing phone number' });
+                errors.push({ row: rowNum, reason: 'Missing contact number', originalRow: rawRow });
+                if (rowNum % 100 === 0 || rowNum === totalRows) {
+                    await cacheSet(`csv_progress:${batchId}`, {
+                        id: batchId,
+                        uploaded_by: uploadedBy,
+                        vertical_id: verticalId,
+                        status: 'processing',
+                        total_rows: totalRows,
+                        success_count: 0,
+                        failed_count: errors.length,
+                        duplicate_count: duplicateCount,
+                        errors: errors
+                    }, 3600);
+                }
+                continue;
+            }
+
+            const rawEmployeeName = row['employee name'] || '';
+            if (!rawEmployeeName.trim()) {
+                errors.push({ row: rowNum, reason: 'Missing employee name', originalRow: rawRow });
+                if (rowNum % 100 === 0 || rowNum === totalRows) {
+                    await cacheSet(`csv_progress:${batchId}`, {
+                        id: batchId,
+                        uploaded_by: uploadedBy,
+                        vertical_id: verticalId,
+                        status: 'processing',
+                        total_rows: totalRows,
+                        success_count: 0,
+                        failed_count: errors.length,
+                        duplicate_count: duplicateCount,
+                        errors: errors
+                    }, 3600);
+                }
+                continue;
+            }
+
+            if (!rawName.trim()) {
+                errors.push({ row: rowNum, reason: 'Missing business / person / shop / company name', originalRow: rawRow });
                 if (rowNum % 100 === 0 || rowNum === totalRows) {
                     await cacheSet(`csv_progress:${batchId}`, {
                         id: batchId,
@@ -235,7 +264,7 @@ export const processCsvJob = async (job) => {
 
             if (phoneSet.has(rawPhone)) {
                 duplicateCount++;
-                errors.push({ row: rowNum, reason: `Duplicate phone number: ${rawPhone}` });
+                errors.push({ row: rowNum, reason: `duplicated`, originalRow: rawRow });
                 if (rowNum % 100 === 0 || rowNum === totalRows) {
                     await cacheSet(`csv_progress:${batchId}`, {
                         id: batchId,
@@ -252,39 +281,48 @@ export const processCsvJob = async (job) => {
                 continue;
             }
 
+            phoneSet.add(rawPhone);
+
             const dataMap = {};
-            // Core templates mappings
-            dataMap['date'] = row['date'] || '';
-            dataMap['employeeName'] = row['employee name'] || '';
-            dataMap['businessType'] = row['business type'] || row['businesstype'] || '';
-            dataMap['businessName'] = rawBusiness;
-            dataMap['area'] = row['area'] || '';
-            dataMap['city'] = row['city'] || '';
-            dataMap['phone'] = rawPhone;
-            dataMap['deliveredLocation'] = row['map location link/address'] || row['map location link / address'] || row['delivered location'] || row['address'] || '';
-            dataMap['requirement'] = row['requirement'] || row['requirement/order (if any)'] || row['requirement/order\n(if any)'] || '';
-            dataMap['remarks'] = row['remarks'] || '';
-            dataMap['requireFollowUp'] = row['follow up require (yes/no)'] || row['require follow up (yes/no)'] || row['follow up require'] || row['require follow up'] || '';
-            dataMap['followUpDate'] = row['follow up date'] || '';
-            dataMap['followUpRemarks'] = row['follow up remarks'] || '';
+            const isPositiveLead = leadType === 'POSITIVE';
+
+            if (isPositiveLead) {
+                dataMap['date'] = row['date'] || '';
+                dataMap['employeeName'] = row['employee name'] || '';
+                dataMap['businessType'] = row['business type'] || '';
+                dataMap['businessName'] = rawBusiness;
+                dataMap['area'] = row['area'] || '';
+                dataMap['city'] = row['city'] || '';
+                dataMap['pointOfContact'] = row['point of contact'] || row['pointofcontact'] || '';
+                dataMap['remarks'] = row['remarks'] || '';
+                dataMap['recordings'] = row['recordings'] || '';
+                dataMap['followUpRequired'] = row['follow-up required'] || '';
+                dataMap['followUps'] = row['follow-ups'] || '';
+                dataMap['followUpDates'] = row['follow-up dates'] || '';
+                dataMap['followUpRemarks'] = row['follow-up remarks'] || '';
+                dataMap['requirement'] = row['requirement if any'] || row['requirement'] || '';
+                dataMap['notes'] = row['a notes to the cos team only'] || row['notes'] || '';
+            } else {
+                dataMap['date'] = row['date'] || '';
+                dataMap['employeeName'] = row['employee name'] || '';
+                dataMap['businessType'] = row['business type'] || '';
+                dataMap['businessName'] = rawBusiness;
+                dataMap['area'] = row['area'] || '';
+                dataMap['city'] = row['city'] || '';
+                dataMap['pointOfContact'] = row['point of contact'] || row['pointofcontact'] || '';
+                dataMap['deliveredLocation'] = row['link address'] || row['delivered location'] || row['address'] || '';
+                dataMap['remarks'] = row['remarks'] || '';
+                dataMap['recordings'] = row['recordings'] || '';
+                dataMap['appointmentType'] = row['appointment type (yes or no)'] || row['appointment type'] || '';
+                dataMap['appointmentDate'] = row['appointment date'] || '';
+                dataMap['appointmentTime'] = row['appointment time'] || '';
+                dataMap['requirement'] = row['requirement order if any'] || row['requirement'] || '';
+                dataMap['notes'] = row['notes to the cos if any'] || row['notes'] || '';
+            }
 
             const empSpokenRaw = row['employee name'] || '';
             const empSpokenName = empSpokenRaw.toLowerCase().trim();
             const rowAssignedTo = agentMap.get(empSpokenName) || null;
-
-            const rawLeadType = row['lead type'] || row['type'] || leadType;
-            let leadTypeVal = leadType;
-            if (leadType === 'CALL') {
-                if (rawLeadType.toLowerCase().includes('field')) {
-                    leadTypeVal = 'FIELD';
-                }
-            }
-
-            const rawStatus = (row['status'] || 'new').toLowerCase().trim();
-            let statusVal = 'new';
-            if (['new', 'contacted', 'converted', 'lost'].includes(rawStatus)) {
-                statusVal = rawStatus;
-            }
 
             for (const cfg of configs) {
                 const header = (cfg.csv_header || cfg.label).toLowerCase().trim();
@@ -303,9 +341,11 @@ export const processCsvJob = async (job) => {
                 name: rawName, phone: rawPhone,
                 businessName: rawBusiness, data: dataMap,
                 assignedTo: rowAssignedTo,
-                leadType: leadTypeVal,
-                status: statusVal,
-                csvRowNum: rowNum
+                subVerticalId: subVerticalId,
+                leadType: leadType,
+                status: 'new',
+                csvRowNum: rowNum,
+                originalRow: rawRow
             });
 
             phoneSet.add(rawPhone);
@@ -344,7 +384,7 @@ export const processCsvJob = async (job) => {
                         const result = await query(sql, params);
                         successCount += result.rowCount;
                     } catch (singleErr) {
-                        errors.push({ row: lead.csvRowNum, reason: singleErr.message });
+                        errors.push({ row: lead.csvRowNum, reason: singleErr.message, originalRow: lead.originalRow });
                     }
                 }
             }

@@ -13,6 +13,13 @@ import toast from 'react-hot-toast';
 import { useUiStore } from '../store/uiStore.js';
 import { useAuthStore } from '../store/authStore.js';
 
+const formatDate = (value) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString();
+};
+
 export const LeadDetailPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -28,6 +35,7 @@ export const LeadDetailPage = () => {
   // Metadata dropdown lists
   const [subVerticals, setSubVerticals] = useState([]);
   const [agents, setAgents] = useState([]);
+  const [employeeNameInput, setEmployeeNameInput] = useState('');
   
   // Sub-vertical specific custom fields and stages
   const [customFields, setCustomFields] = useState([]);
@@ -100,9 +108,16 @@ export const LeadDetailPage = () => {
           subVerticalId: leadData.sub_vertical_id || '',
           assignedTo: leadData.assigned_to || '',
           leadType: leadData.lead_type || 'CALL',
+          stageId: leadData.stage_id || leadData.stageId || '',
           customValues: leadData.customValues || {},
           data: leadData.data || {}
         });
+        const allPossibleUsers = [
+          ...(usersRes.data.data || []),
+          ...(subUsersRes.data.data || [])
+        ];
+        const matched = allPossibleUsers.find(u => (u.id || u._id) === leadData.assigned_to);
+        setEmployeeNameInput(matched ? matched.name : '');
       }
     } catch (err) {
       console.error('Error fetching lead details:', err);
@@ -165,13 +180,17 @@ export const LeadDetailPage = () => {
       const payload = {
         name: formData.name,
         phone: formData.phone,
-        businessName: formData.businessName,
+        businessName: formData.name, // keep name and businessName in sync
         subVerticalId: formData.subVerticalId || null,
         assignedTo: formData.assignedTo || null,
-        status: formData.status,
-        leadType: formData.leadType || 'CALL',
+        status: lead.status, // preserve status as it is not assignable in profile
+        leadType: lead.lead_type === 'POSITIVE' ? 'POSITIVE' : (formData.leadType || 'CALL'),
+        stageId: formData.stageId || null,
         customValues: formData.customValues || {},
-        data: formData.data
+        data: {
+          ...(formData.data || {}),
+          employeeName: employeeNameInput || '',
+        }
       };
 
       const response = await axios.patch(`/api/v1/leads/${id}`, payload);
@@ -365,11 +384,11 @@ export const LeadDetailPage = () => {
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-4">
           <button 
-            onClick={() => navigate('/leads')} 
+            onClick={() => navigate(lead.lead_type === 'POSITIVE' ? '/follow-ups-positives' : '/leads')} 
             className="flex items-center gap-1.5 text-xs text-[--text-secondary] hover:text-[--accent] transition-all uppercase tracking-wider bg-transparent border-0 outline-none cursor-pointer"
           >
             <ArrowLeft size={16} />
-            <span>Back to manager</span>
+            <span>{lead.lead_type === 'POSITIVE' ? 'Back to Positives' : 'Back to manager'}</span>
           </button>
           
           <button 
@@ -430,138 +449,475 @@ export const LeadDetailPage = () => {
               </div>
             </div>
 
-            {/* Base Fields Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-[--text-secondary] uppercase">Full Name</label>
-                {editMode ? (
-                  <input type="text" {...register('name', { required: 'Name is required' })} />
+            {/* Lead Fields Section */}
+            <div className="space-y-4">
+              <div className="border-b border-[--border] pb-2 mb-4">
+                <h3 className="text-sm font-black text-[--text-primary] uppercase tracking-wide">Lead Fields</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {lead.lead_type === 'POSITIVE' ? (
+                  <>
+                    {/* Positive Template Fields */}
+                    {/* 1. Date */}
+                    <FormField
+                      label="Date"
+                      editMode={editMode}
+                      editContent={<input type="date" {...register('data.date')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{formatDate(lead.data?.date)}</span>}
+                    />
+
+                    {/* 2. Employee name */}
+                    <FormField
+                      label="Employee Name *"
+                      editMode={editMode}
+                      editContent={
+                        <>
+                          <input type="hidden" {...register('assignedTo', { required: 'Employee name is required' })} />
+                          <input
+                            type="text"
+                            required
+                            list="detail-agents-list"
+                            value={employeeNameInput}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setEmployeeNameInput(val);
+                              const possibleUsers = watchedSubVerticalId ? subVerticalUsers : agents;
+                              const matched = possibleUsers.find(u => u.name.toLowerCase().trim() === val.toLowerCase().trim());
+                              setValue('assignedTo', matched ? (matched.id || matched._id) : '', { shouldValidate: true });
+                            }}
+                            placeholder="Type or select employee..."
+                          />
+                          <datalist id="detail-agents-list">
+                            {(watchedSubVerticalId ? subVerticalUsers : agents).map(ag => (
+                              <option key={ag.id || ag._id} value={ag.name} />
+                            ))}
+                          </datalist>
+                        </>
+                      }
+                      viewContent={
+                        <div className="flex items-center gap-1.5 py-2 text-sm text-[--text-primary]">
+                          <UserIcon size={14} className="text-[--accent]" />
+                          <span>{lead.assignee_name || lead.data?.employeeName || 'Unassigned'}</span>
+                        </div>
+                      }
+                    />
+
+                    {/* 3. Business type */}
+                    <FormField
+                      label="Business Type"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.businessType')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.businessType || '-'}</span>}
+                    />
+
+                    {/* 4. Business / Person / Shop / Company name */}
+                    <FormField
+                      label="Business / Person / Shop / Company Name *"
+                      editMode={editMode}
+                      editContent={
+                        <input
+                          type="text"
+                          required
+                          {...register('name', { required: 'Business name is required' })}
+                        />
+                      }
+                      viewContent={<span className="text-sm text-[--text-primary] py-2 font-semibold">{lead.name || lead.business_name || lead.businessName || '-'}</span>}
+                    />
+
+                    {/* 5. Area */}
+                    <FormField
+                      label="Area"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.area')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.area || '-'}</span>}
+                    />
+
+                    {/* 6. City */}
+                    <FormField
+                      label="City"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.city')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.city || '-'}</span>}
+                    />
+
+                    {/* 7. Contact number */}
+                    <FormField
+                      label="Contact Number *"
+                      editMode={editMode}
+                      editContent={
+                        <input
+                          type="text"
+                          required
+                          {...register('phone', { required: 'Contact number is required' })}
+                        />
+                      }
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.phone || '-'}</span>}
+                    />
+
+                    {/* 8. Point of Contact */}
+                    <FormField
+                      label="Point of Contact"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.pointOfContact')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.pointOfContact || '-'}</span>}
+                    />
+
+                    {/* 11. Remarks */}
+                    <FormField
+                      label="Remarks"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.remarks')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.remarks || '-'}</span>}
+                    />
+
+                    {/* 12. Recordings */}
+                    <FormField
+                      label="Recordings"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.recordings')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.recordings || '-'}</span>}
+                    />
+
+                    {/* 13. Follow-up required */}
+                    <FormField
+                      label="Follow-up required"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.followUpRequired')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.followUpRequired || '-'}</span>}
+                    />
+
+                    {/* 14. Follow-ups */}
+                    <FormField
+                      label="Follow-ups"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.followUps')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.followUps || '-'}</span>}
+                    />
+
+                    {/* 15. Follow-up dates */}
+                    <FormField
+                      label="Follow-up dates"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.followUpDates')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.followUpDates || '-'}</span>}
+                    />
+
+                    {/* 16. Follow-up remarks */}
+                    <FormField
+                      label="Follow-up remarks"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.followUpRemarks')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.followUpRemarks || '-'}</span>}
+                    />
+
+                    {/* 17. Requirement if any */}
+                    <FormField
+                      label="Requirement if any"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.requirement')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.requirement || '-'}</span>}
+                    />
+
+                    {/* 18. A notes to the cos team only */}
+                    <FormField
+                      label="A notes to the cos team only"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.notes')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.notes || '-'}</span>}
+                    />
+                  </>
                 ) : (
-                  <span className="text-sm text-[--text-primary] py-2 font-semibold">{lead.name}</span>
+                  <>
+                    {/* Standard (COS) Template Fields */}
+                    {/* 1. Date */}
+                    <FormField
+                      label="Date"
+                      editMode={editMode}
+                      editContent={<input type="date" {...register('data.date')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{formatDate(lead.data?.date)}</span>}
+                    />
+
+                    {/* 2. Employee name */}
+                    <FormField
+                      label="Employee Name *"
+                      editMode={editMode}
+                      editContent={
+                        <>
+                          <input type="hidden" {...register('assignedTo', { required: 'Employee name is required' })} />
+                          <input
+                            type="text"
+                            required
+                            list="detail-agents-list"
+                            value={employeeNameInput}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setEmployeeNameInput(val);
+                              const possibleUsers = watchedSubVerticalId ? subVerticalUsers : agents;
+                              const matched = possibleUsers.find(u => u.name.toLowerCase().trim() === val.toLowerCase().trim());
+                              setValue('assignedTo', matched ? (matched.id || matched._id) : '', { shouldValidate: true });
+                            }}
+                            placeholder="Type or select employee..."
+                          />
+                          <datalist id="detail-agents-list">
+                            {(watchedSubVerticalId ? subVerticalUsers : agents).map(ag => (
+                              <option key={ag.id || ag._id} value={ag.name} />
+                            ))}
+                          </datalist>
+                        </>
+                      }
+                      viewContent={
+                        <div className="flex items-center gap-1.5 py-2 text-sm text-[--text-primary]">
+                          <UserIcon size={14} className="text-[--accent]" />
+                          <span>{lead.assignee_name || lead.data?.employeeName || 'Unassigned'}</span>
+                        </div>
+                      }
+                    />
+
+                    {/* 3. Business type */}
+                    <FormField
+                      label="Business Type"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.businessType')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.businessType || '-'}</span>}
+                    />
+
+                    {/* 4. Business person, shop, and company name */}
+                    <FormField
+                      label="Business / Person / Shop / Company Name *"
+                      editMode={editMode}
+                      editContent={
+                        <input
+                          type="text"
+                          required
+                          {...register('name', { required: 'Business name is required' })}
+                        />
+                      }
+                      viewContent={<span className="text-sm text-[--text-primary] py-2 font-semibold">{lead.name || lead.business_name || lead.businessName || '-'}</span>}
+                    />
+
+                    {/* 5. Contact number */}
+                    <FormField
+                      label="Contact Number *"
+                      editMode={editMode}
+                      editContent={
+                        <input
+                          type="text"
+                          required
+                          {...register('phone', { required: 'Contact number is required' })}
+                        />
+                      }
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.phone || '-'}</span>}
+                    />
+
+                    {/* 6. Point of Contact */}
+                    <FormField
+                      label="Point of Contact"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.pointOfContact')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.pointOfContact || '-'}</span>}
+                    />
+
+                    {/* 8. Area */}
+                    <FormField
+                      label="Area"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.area')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.area || '-'}</span>}
+                    />
+
+                    {/* 9. City */}
+                    <FormField
+                      label="City"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.city')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.city || '-'}</span>}
+                    />
+
+                    {/* 11. Link address */}
+                    <FormField
+                      label="Link Address"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.deliveredLocation')} />}
+                      viewContent={
+                        lead.data?.deliveredLocation ? (
+                          <div className="py-2">
+                            <a href={lead.data.deliveredLocation} target="_blank" rel="noreferrer" className="text-[--accent] hover:underline inline-flex items-center gap-1 font-semibold">
+                              <span>View Link</span>
+                              <ExternalLink size={12} />
+                            </a>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-[--text-primary] py-2">-</span>
+                        )
+                      }
+                    />
+
+                    {/* 12. Remarks */}
+                    <FormField
+                      label="Remarks"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.remarks')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.remarks || '-'}</span>}
+                    />
+
+                    {/* 12.1. Recordings */}
+                    <FormField
+                      label="Recordings"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.recordings')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.recordings || '-'}</span>}
+                    />
+
+                    {/* 14. Appointment type (yes or no) */}
+                    <FormField
+                      label="Appointment type (yes or no)"
+                      editMode={editMode}
+                      editContent={
+                        <select {...register('data.appointmentType')}>
+                          <option value="">-- Select --</option>
+                          <option value="YES">YES</option>
+                          <option value="NO">NO</option>
+                        </select>
+                      }
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.appointmentType || '-'}</span>}
+                    />
+
+                    {/* 15. Appointment date */}
+                    <FormField
+                      label="Appointment date"
+                      editMode={editMode}
+                      editContent={<input type="date" {...register('data.appointmentDate')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{formatDate(lead.data?.appointmentDate)}</span>}
+                    />
+
+                    {/* 13. Appointment time */}
+                    <FormField
+                      label="Appointment time"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.appointmentTime')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.appointmentTime || '-'}</span>}
+                    />
+
+                    {/* 17. Requirement order if any */}
+                    <FormField
+                      label="Requirement order if any"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.requirement')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.requirement || '-'}</span>}
+                    />
+
+                    {/* 18. Notes to the cos if any */}
+                    <FormField
+                      label="Notes to the cos if any"
+                      editMode={editMode}
+                      editContent={<input type="text" {...register('data.notes')} />}
+                      viewContent={<span className="text-sm text-[--text-primary] py-2">{lead.data?.notes || '-'}</span>}
+                    />
+                  </>
                 )}
+              </div>
+              {/* Validation Errors for Main Form Fields */}
+              <div className="flex flex-col gap-1">
                 {errors.name && <span className="text-red-500 text-xs font-semibold">{errors.name.message}</span>}
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-[--text-secondary] uppercase">Phone Number</label>
-                {editMode ? (
-                  <input type="text" {...register('phone')} />
-                ) : (
-                  <span className="text-sm text-[--text-primary] py-2">{lead.phone || '-'}</span>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-[--text-secondary] uppercase">Business/Organization</label>
-                {editMode ? (
-                  <input type="text" {...register('businessName')} />
-                ) : (
-                  <span className="text-sm text-[--text-primary] py-2">{lead.business_name || lead.businessName || '-'}</span>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-[--text-secondary] uppercase">Lead Contact Type</label>
-                {editMode ? (
-                  <select {...register('leadType')}>
-                    <option value="CALL">Call Inquiry (Remote)</option>
-                    <option value="FIELD">Field Visit (On-Site)</option>
-                  </select>
-                ) : (
-                  <span className="text-sm text-[--text-primary] py-2 font-semibold flex items-center gap-1">
-                    {lead.lead_type === 'FIELD' ? (
-                      <span className="px-2 py-0.5 bg-sky-50 text-sky-600 border border-sky-200 text-[10px] rounded uppercase font-bold">
-                        FIELD VISIT
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 bg-stone-100 text-stone-600 border border-stone-200 text-[10px] rounded uppercase font-bold">
-                        CALL INQUIRY
-                      </span>
-                    )}
-                  </span>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-[--text-secondary] uppercase">Classification Segment</label>
-                {editMode ? (
-                  <select {...register('subVerticalId')}>
-                    <option value="">-- Choose Sub-vertical --</option>
-                    {subVerticals.map(sub => (
-                      <option key={sub._id} value={sub._id}>{sub.name}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <div className="flex items-center gap-1.5 py-2 text-sm text-[--text-primary]">
-                    <Briefcase size={14} className="text-[--accent]" />
-                    <span>{lead.sv_name || 'Unclassified'}</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-[--text-secondary] uppercase">Employee Name</label>
-                {editMode ? (
-                  <select {...register('assignedTo')}>
-                    <option value="">-- Unassigned --</option>
-                    {(watchedSubVerticalId ? subVerticalUsers : agents).map(ag => (
-                      <option key={ag.id} value={ag.id}>{ag.name}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <div className="flex items-center gap-1.5 py-2 text-sm text-[--text-primary]">
-                    <UserIcon size={14} className="text-[--accent]" />
-                    <span>{lead.assignee_name || 'Unassigned'}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Lead Stage inside edit form */}
-              {editMode && stages.length > 0 && (
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-bold text-[--text-secondary] uppercase">Lead Stage</label>
-                  <select {...register('stageId')}>
-                    <option value="">-- None --</option>
-                    {stages.map(st => (
-                      <option key={st.id} value={st.id}>{st.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* Status transition picker inside Form */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-[--text-secondary] uppercase">Life-Cycle Status</label>
-                {editMode ? (
-                  <select {...register('status')}>
-                    {allowedTransitions.map(st => (
-                      <option key={st.value || st} value={st.value || st}>
-                        {(st.label || st).toUpperCase()}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div className="py-1">
-                    <StatusBadge status={lead.status} />
-                  </div>
-                )}
+                {errors.assignedTo && <span className="text-red-500 text-xs font-semibold">{errors.assignedTo.message}</span>}
+                {errors.phone && <span className="text-red-500 text-xs font-semibold">{errors.phone.message}</span>}
               </div>
             </div>
 
-            {/* Custom fields section (F3) */}
-            {customFields.length > 0 && (
-              <div className="border-t border-[--border] pt-6 space-y-4">
-                <h4 className="text-xs font-black text-[--text-secondary] uppercase tracking-wider">Sub-Vertical Specific Custom Fields</h4>
-                
+            {/* Assigning Section */}
+            <div className="border-t border-[--border-strong] pt-5 space-y-4">
+              <div className="border-b border-[--border] pb-2 mb-4">
+                <h3 className="text-sm font-black text-[--text-primary] uppercase tracking-wide">Assigning</h3>
+              </div>
+              <div className={`grid grid-cols-1 ${lead.lead_type === 'POSITIVE' ? '' : 'md:grid-cols-2'} gap-4`}>
+                {/* 19. Lead type */}
+                {lead.lead_type !== 'POSITIVE' && (
+                  <FormField
+                    label="Lead Type"
+                    editMode={editMode}
+                    editContent={
+                      <select {...register('leadType')}>
+                        <option value="CALL">Call Inquiry (Remote)</option>
+                        <option value="FIELD">Field Visit (On-Site)</option>
+                      </select>
+                    }
+                    viewContent={
+                      <div className="py-2 font-semibold">
+                        {lead.lead_type === 'FIELD' ? (
+                          <span className="px-2 py-0.5 bg-sky-50 text-sky-600 border border-sky-200 text-[10px] rounded uppercase font-bold">
+                            FIELD VISIT
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 bg-stone-100 text-stone-600 border border-stone-200 text-[10px] rounded uppercase font-bold">
+                            CALL INQUIRY
+                          </span>
+                        )}
+                      </div>
+                    }
+                  />
+                )}
+
+                {/* 20. Sub vertical */}
+                <FormField
+                  label="Sub Vertical"
+                  editMode={editMode}
+                  editContent={
+                    <select {...register('subVerticalId')}>
+                      <option value="">-- Choose Sub-vertical --</option>
+                      {subVerticals.map(sub => (
+                        <option key={sub._id} value={sub._id}>{sub.name}</option>
+                      ))}
+                    </select>
+                  }
+                  viewContent={
+                    <div className="flex items-center gap-1.5 py-2 text-sm text-[--text-primary]">
+                      <Briefcase size={14} className="text-[--accent]" />
+                      <span>{lead.sv_name || 'Unclassified'}</span>
+                    </div>
+                  }
+                />
+              </div>
+            </div>
+
+            {/* Custom fields & stage section */}
+            {(customFields.length > 0 || (editMode && stages.length > 0) || (!editMode && lead.stage_id)) && (
+              <div className="border-t border-[--border-strong] pt-5 space-y-4">
+                <div className="border-b border-[--border] pb-2 mb-4">
+                  <h3 className="text-sm font-black text-[--text-primary] uppercase tracking-wide">
+                    Sub-Vertical Specific Fields
+                  </h3>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Lead Stage */}
+                  {((editMode && stages.length > 0) || (!editMode && lead.stage_id)) && (
+                    <FormField
+                      label="Lead Stage"
+                      editMode={editMode}
+                      editContent={
+                        <select {...register('stageId')}>
+                          <option value="">-- None --</option>
+                          {stages.map(st => (
+                            <option key={st.id} value={st.id}>{st.name}</option>
+                          ))}
+                        </select>
+                      }
+                      viewContent={
+                        <div className="py-2 text-sm text-[--text-primary] font-semibold">
+                          {stages.find(st => st.id === lead.stage_id || st.id === lead.stageId)?.name || 'None'}
+                        </div>
+                      }
+                    />
+                  )}
+
+                  {/* Custom Fields */}
                   {customFields.map(field => {
                     const error = errors.customValues?.[field.field_key];
 
                     return (
                       <div key={field.id} className="flex flex-col gap-1.5">
-                        <label className="text-xs font-bold text-[--text-secondary] uppercase">
+                        <span className="text-xs font-bold text-[--text-secondary] uppercase">
                           {field.label} {field.is_required && <span className="text-red-500">*</span>}
-                        </label>
+                        </span>
 
                         {!editMode ? (
                           <div className="bg-stone-50 border border-[--border] rounded-lg px-3 py-2 text-xs text-[--text-primary] min-h-[36px] flex items-center">
@@ -974,5 +1330,12 @@ export const LeadDetailPage = () => {
     </div>
   );
 };
+
+const FormField = ({ label, editMode, editContent, viewContent }) => (
+  <div className="flex flex-col gap-1.5">
+    <span className="text-xs font-bold text-[--text-secondary] uppercase">{label}</span>
+    {editMode ? editContent : viewContent}
+  </div>
+);
 
 export default LeadDetailPage;

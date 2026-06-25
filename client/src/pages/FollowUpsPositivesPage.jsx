@@ -41,15 +41,28 @@ const BASE_DYNAMIC_FIELDS = [
   { key: 'businessType', label: 'Business Type', type: 'text', defaultValue: '' },
   { key: 'area', label: 'Area', type: 'text', defaultValue: '' },
   { key: 'city', label: 'City', type: 'text', defaultValue: '' },
-  { key: 'deliveredLocation', label: 'Map Location Link / Address', type: 'text', defaultValue: '' },
-  { key: 'requirement', label: 'Requirement', type: 'text', defaultValue: '' },
+  { key: 'pointOfContact', label: 'Point of Contact', type: 'text', defaultValue: '' },
   { key: 'remarks', label: 'Remarks', type: 'text', defaultValue: '' },
-  { key: 'requireFollowUp', label: 'Require Follow Up (Yes/No)', type: 'text', defaultValue: '' },
-  { key: 'followUpDate', label: 'Follow Up Date', type: 'date', defaultValue: '' },
-  { key: 'followUpRemarks', label: 'Follow Up Remarks', type: 'text', defaultValue: '' },
+  { key: 'recordings', label: 'Recordings', type: 'text', defaultValue: '' },
+  { key: 'followUpRequired', label: 'Follow-up required', type: 'text', defaultValue: '' },
+  { key: 'followUps', label: 'Follow-ups', type: 'text', defaultValue: '' },
+  { key: 'followUpDates', label: 'Follow-up dates', type: 'text', defaultValue: '' },
+  { key: 'followUpRemarks', label: 'Follow-up remarks', type: 'text', defaultValue: '' },
+  { key: 'requirement', label: 'Requirement if any', type: 'text', defaultValue: '' },
+  { key: 'notes', label: 'A notes to the cos team only', type: 'text', defaultValue: '' },
 ];
 
-const BASE_DYNAMIC_FIELD_KEYS = new Set(BASE_DYNAMIC_FIELDS.map((field) => field.key));
+const BASE_DYNAMIC_FIELD_KEYS = new Set([
+  ...BASE_DYNAMIC_FIELDS.map((field) => field.key),
+  'point_of_contact',
+  'point_of_contact_name',
+  'point_of_contact_number',
+  'pointofcontact',
+  'pointofcontactname',
+  'pointofcontactnumber',
+  'products',
+  'product'
+]);
 
 const getLeadData = (lead, key, fallback = '') => {
   if (key === '__proto__' || key === 'constructor' || key === 'prototype') return fallback;
@@ -196,6 +209,7 @@ export const FollowUpsPositivesPage = () => {
   const [leadFormPhone, setLeadFormPhone] = useState('');
   const [leadFormBusiness, setLeadFormBusiness] = useState('');
   const [leadFormAssignedTo, setLeadFormAssignedTo] = useState('');
+  const [employeeNameInput, setEmployeeNameInput] = useState('');
   const [leadFormDynamic, setLeadFormDynamic] = useState(createBaseDynamicDefaults());
   const [formErrors, setFormErrors] = useState([]);
   const [leadFormGeotagCoords, setLeadFormGeotagCoords] = useState(null);
@@ -210,6 +224,8 @@ export const FollowUpsPositivesPage = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadResult, setUploadResult] = useState(null);
   const [leadFormSubVerticalId, setLeadFormSubVerticalId] = useState('');
+  const [leadFormLeadType, setLeadFormLeadType] = useState('POSITIVE');
+  const [importLeadType, setImportLeadType] = useState('POSITIVE');
 
   const isAdmin = user?.role === 'super_admin' || user?.role === 'vertical_admin';
 
@@ -441,10 +457,12 @@ export const FollowUpsPositivesPage = () => {
     setLeadFormBusiness('');
     setLeadFormSubVerticalId('');
     setLeadFormAssignedTo('');
+    setEmployeeNameInput('');
     setLeadFormGeotagCoords(null);
     setLeadFormGeotagFile(null);
     setLeadFormDynamic(buildInitialDynamic());
     setLeadFormStatus('new');
+    setLeadFormLeadType('POSITIVE');
     setLeadModalOpen(true);
   };
 
@@ -455,7 +473,11 @@ export const FollowUpsPositivesPage = () => {
     setLeadFormPhone(lead.phone || '');
     setLeadFormBusiness(lead.businessName || lead.business_name || '');
     setLeadFormSubVerticalId(lead.subVerticalId?._id || lead.subVerticalId || lead.sub_vertical_id || '');
-    setLeadFormAssignedTo(lead.assigned_to || lead.assignedTo || '');
+    const assignedId = lead.assigned_to || lead.assignedTo || '';
+    setLeadFormAssignedTo(assignedId);
+    const matchedAgent = agents.find(ag => ag.id === assignedId || ag._id === assignedId);
+    setEmployeeNameInput(matchedAgent ? matchedAgent.name : (lead.data?.employeeName || ''));
+    setLeadFormLeadType(lead.lead_type || lead.leadType || 'POSITIVE');
     setLeadFormGeotagCoords(
       lead.geotag_lat || lead.geotagLat
         ? {
@@ -481,9 +503,12 @@ export const FollowUpsPositivesPage = () => {
       businessName: leadFormBusiness,
       verticalId: activeVertical._id,
       subVerticalId: leadFormSubVerticalId || subVerticalFilter || null,
-      data: leadFormDynamic,
+      data: {
+        ...leadFormDynamic,
+        employeeName: employeeNameInput || '',
+      },
       assignedTo: leadFormAssignedTo || null,
-      leadType: 'POSITIVE',
+      leadType: leadFormLeadType || 'POSITIVE',
       status: leadFormStatus,
     };
 
@@ -511,8 +536,10 @@ export const FollowUpsPositivesPage = () => {
         businessName: payload.businessName,
         business_name: payload.businessName,
         status: payload.status,
+        lead_type: payload.leadType,
         data: { ...l.data, ...payload.data },
         assigned_to: payload.assignedTo,
+        assignee_name: employeeNameInput || '',
         _optimistic: true
       } : l);
       setLeads(updatedLeads);
@@ -525,11 +552,12 @@ export const FollowUpsPositivesPage = () => {
         businessName: payload.businessName,
         business_name: payload.businessName,
         status: payload.status,
-        lead_type: 'POSITIVE',
+        lead_type: payload.leadType,
         data: payload.data,
         vertical_id: payload.verticalId,
         sub_vertical_id: payload.subVerticalId,
         assigned_to: payload.assignedTo,
+        assignee_name: employeeNameInput || '',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         _optimistic: true
@@ -863,9 +891,9 @@ export const FollowUpsPositivesPage = () => {
         cell: ({ row }) => (
           <div className="flex items-center gap-1.5">
             <div className="w-5 h-5 rounded bg-stone-100 flex items-center justify-center text-[8px] border border-stone-200 font-bold">
-              {row.original.assignee_name?.slice(0, 1) || '?'}
+              {(row.original.assignee_name || row.original.data?.employeeName)?.slice(0, 1) || '?'}
             </div>
-            <span>{row.original.assignee_name || 'Unassigned'}</span>
+            <span>{row.original.assignee_name || row.original.data?.employeeName || 'Unassigned'}</span>
           </div>
         ),
       },
@@ -1536,17 +1564,26 @@ export const FollowUpsPositivesPage = () => {
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Employee Name</span>
-                    <select
-                      value={leadFormAssignedTo}
-                      onChange={(e) => setLeadFormAssignedTo(e.target.value)}
-                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent] font-semibold"
-                    >
-                      <option value="">-- Unassigned --</option>
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Employee Name *</span>
+                    <input
+                      type="text"
+                      required
+                      list="positives-agents-list"
+                      value={employeeNameInput}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setEmployeeNameInput(val);
+                        const matched = agents.find(ag => ag.name.toLowerCase().trim() === val.toLowerCase().trim());
+                        setLeadFormAssignedTo(matched ? (matched.id || matched._id) : '');
+                      }}
+                      placeholder="Type or select employee..."
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                    />
+                    <datalist id="positives-agents-list">
                       {agents.map(ag => (
-                        <option key={ag.id || ag._id} value={ag.id || ag._id}>{ag.name}</option>
+                        <option key={ag.id || ag._id} value={ag.name} />
                       ))}
-                    </select>
+                    </datalist>
                   </div>
                 </div>
 
@@ -1602,10 +1639,10 @@ export const FollowUpsPositivesPage = () => {
                   </div>
                 </div>
 
-                {/* Row 4: Contact + Map Location Link / Address */}
-                <div className="grid grid-cols-2 gap-4">
+                {/* Row 4: Contact Number */}
+                <div className="grid grid-cols-1">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Contact *</span>
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Contact Number *</span>
                     <input
                       type="text"
                       required
@@ -1615,22 +1652,99 @@ export const FollowUpsPositivesPage = () => {
                       placeholder="Enter contact number"
                     />
                   </div>
+                </div>
+
+                {/* Row 5: Point of Contact Name + Point of Contact Number */}
+                {/* Row 5: Point of Contact */}
+                <div className="grid grid-cols-1">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Map Location Link / Address</span>
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Point of Contact</span>
                     <input
                       type="text"
-                      value={getLeadData({ data: leadFormDynamic }, 'deliveredLocation')}
-                      onChange={(e) => handleDynamicChange('deliveredLocation', e.target.value)}
+                      value={getLeadData({ data: leadFormDynamic }, 'pointOfContact')}
+                      onChange={(e) => handleDynamicChange('pointOfContact', e.target.value)}
                       className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="Google Maps link or Address"
+                      placeholder="Enter point of contact"
                     />
                   </div>
                 </div>
 
-                {/* Row 5: Requirement + Remarks */}
+                {/* Row 6: Remarks + Recordings */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Requirement</span>
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Remarks</span>
+                    <input
+                      type="text"
+                      value={getLeadData({ data: leadFormDynamic }, 'remarks')}
+                      onChange={(e) => handleDynamicChange('remarks', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                      placeholder="General remarks"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Recordings</span>
+                    <input
+                      type="text"
+                      value={getLeadData({ data: leadFormDynamic }, 'recordings')}
+                      onChange={(e) => handleDynamicChange('recordings', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                      placeholder="Recordings link if any"
+                    />
+                  </div>
+                </div>
+
+                {/* Row 7: Follow-up required + Follow-ups */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow-up required</span>
+                    <input
+                      type="text"
+                      value={getLeadData({ data: leadFormDynamic }, 'followUpRequired')}
+                      onChange={(e) => handleDynamicChange('followUpRequired', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                      placeholder="e.g. Yes/No"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow-ups</span>
+                    <input
+                      type="text"
+                      value={getLeadData({ data: leadFormDynamic }, 'followUps')}
+                      onChange={(e) => handleDynamicChange('followUps', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                      placeholder="Follow-ups notes"
+                    />
+                  </div>
+                </div>
+
+                {/* Row 8: Follow-up dates + Follow-up remarks */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow-up dates</span>
+                    <input
+                      type="text"
+                      value={getLeadData({ data: leadFormDynamic }, 'followUpDates')}
+                      onChange={(e) => handleDynamicChange('followUpDates', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                      placeholder="Target follow-up dates"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow-up remarks</span>
+                    <input
+                      type="text"
+                      value={getLeadData({ data: leadFormDynamic }, 'followUpRemarks')}
+                      onChange={(e) => handleDynamicChange('followUpRemarks', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                      placeholder="Follow-up remarks"
+                    />
+                  </div>
+                </div>
+
+                {/* Row 9: Requirement if any + A notes to the cos team only */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Requirement if any</span>
                     <input
                       type="text"
                       value={getLeadData({ data: leadFormDynamic }, 'requirement')}
@@ -1640,83 +1754,41 @@ export const FollowUpsPositivesPage = () => {
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Remarks</span>
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">A notes to the cos team only</span>
                     <input
                       type="text"
-                      value={getLeadData({ data: leadFormDynamic }, 'remarks')}
-                      onChange={(e) => handleDynamicChange('remarks', e.target.value)}
+                      value={getLeadData({ data: leadFormDynamic }, 'notes')}
+                      onChange={(e) => handleDynamicChange('notes', e.target.value)}
                       className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="Remarks"
+                      placeholder="Notes to the cos team"
                     />
                   </div>
                 </div>
 
-                {/* Row 6: Follow Up Require + Follow Up Date */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow Up Require (Yes/No)</span>
-                    <select
-                      value={getLeadData({ data: leadFormDynamic }, 'requireFollowUp')}
-                      onChange={(e) => handleDynamicChange('requireFollowUp', e.target.value)}
-                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent] font-semibold"
-                    >
-                      <option value="">-- Select --</option>
-                      <option value="YES">YES</option>
-                      <option value="NO">NO</option>
-                    </select>
+                {/* Assigning Section */}
+                {!subVerticalFilter && (
+                  <div className="border-t border-stone-200 pt-4">
+                    <span className="block text-[10px] font-black uppercase text-[--text-secondary] tracking-wider mb-2">
+                      Assigning
+                    </span>
+                    <div className="grid grid-cols-1 gap-4">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[10px] font-black uppercase text-stone-500">Sub-Vertical *</span>
+                        <select
+                          required
+                          value={leadFormSubVerticalId}
+                          onChange={(e) => setLeadFormSubVerticalId(e.target.value)}
+                          className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent] font-semibold"
+                        >
+                          <option value="">-- Choose Sub-vertical --</option>
+                          {subVerticals.map(sub => (
+                            <option key={sub._id} value={sub._id}>{sub.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow Up Date</span>
-                    <input
-                      type="date"
-                      value={getLeadData({ data: leadFormDynamic }, 'followUpDate')}
-                      onChange={(e) => handleDynamicChange('followUpDate', e.target.value)}
-                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                    />
-                  </div>
-                </div>
-
-                {/* Row 7: Follow Up Remarks */}
-                <div className="flex flex-col gap-1">
-                  <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow Up Remarks</span>
-                  <input
-                    type="text"
-                    value={getLeadData({ data: leadFormDynamic }, 'followUpRemarks')}
-                    onChange={(e) => handleDynamicChange('followUpRemarks', e.target.value)}
-                    className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                    placeholder="Follow up notes"
-                  />
-                </div>
-
-                {/* Row 8: Sub-Vertical + Status */}
-                <div className="border-t border-stone-100 pt-4 grid grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Sub-Vertical *</span>
-                    <select
-                      required
-                      value={leadFormSubVerticalId}
-                      onChange={(e) => setLeadFormSubVerticalId(e.target.value)}
-                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent] font-semibold"
-                    >
-                      <option value="">-- Choose Sub-vertical --</option>
-                      {subVerticals.map(sub => (
-                        <option key={sub._id} value={sub._id}>{sub.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Status</span>
-                    <select
-                      value={leadFormStatus}
-                      onChange={(e) => setLeadFormStatus(e.target.value)}
-                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent] font-semibold"
-                    >
-                      {STATUS_OPTIONS.map(st => (
-                        <option key={st.value || st} value={st.value || st}>{st.label || st}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
+                )}
 
                 {/* Dynamic configs (vertical-specific extra fields) */}
                 {customConfigs.length > 0 && (
@@ -1787,9 +1859,9 @@ export const FollowUpsPositivesPage = () => {
               <button
                 type="button"
                 onClick={handleCloseImportModal}
-                className="text-stone-400 hover:text-stone-600 bg-transparent border-0 outline-none cursor-pointer"
+                className="text-stone-400 hover:text-stone-600 bg-transparent border-0 outline-none cursor-pointer p-1 rounded-md hover:bg-stone-100 transition-colors"
               >
-                âœ•
+                <X size={16} />
               </button>
             </div>
 
@@ -1808,22 +1880,24 @@ export const FollowUpsPositivesPage = () => {
                 </button>
               </div>
 
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[10px] font-black uppercase text-[--text-secondary]">
-                  2. Map Sub-vertical *
-                </span>
-                <select
-                  required
-                  value={leadFormSubVerticalId}
-                  onChange={(e) => setLeadFormSubVerticalId(e.target.value)}
-                  className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent] font-semibold"
-                >
-                  <option value="">-- Choose Sub-vertical --</option>
-                  {subVerticals.map(sub => (
-                    <option key={sub._id} value={sub._id}>{sub.name}</option>
-                  ))}
-                </select>
-              </div>
+              {!subVerticalFilter && (
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[10px] font-black uppercase text-[--text-secondary]">
+                    2. Map Sub-vertical *
+                  </span>
+                  <select
+                    required
+                    value={leadFormSubVerticalId || subVerticalFilter || ''}
+                    onChange={(e) => setLeadFormSubVerticalId(e.target.value)}
+                    className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent] font-semibold"
+                  >
+                    <option value="">-- Choose Sub-vertical --</option>
+                    {subVerticals.map(sub => (
+                      <option key={sub._id} value={sub._id}>{sub.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div className="flex flex-col gap-1.5">
                 <span className="text-[10px] font-black uppercase text-[--text-secondary]">
@@ -1838,21 +1912,7 @@ export const FollowUpsPositivesPage = () => {
                 />
               </div>
 
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[10px] font-black uppercase text-[--text-secondary]">
-                  4. Default Assign Employee Name (Optional)
-                </span>
-                <select
-                  value={assignTarget}
-                  onChange={(e) => setAssignTarget(e.target.value)}
-                  className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent] font-semibold"
-                >
-                  <option value="">-- Unassigned --</option>
-                  {agents.map(ag => (
-                    <option key={ag.id || ag._id} value={ag.id || ag._id}>{ag.name}</option>
-                  ))}
-                </select>
-              </div>
+
 
               {uploadStatus !== 'idle' && (
                 <div className="space-y-1.5 border border-stone-200 p-3 rounded-lg bg-stone-50">
@@ -1865,33 +1925,58 @@ export const FollowUpsPositivesPage = () => {
                   </div>
 
                   {uploadResult && (
-                    <div className="text-[10px] space-y-1 font-semibold text-[--text-secondary] pt-1.5 border-t border-stone-200 mt-1.5">
-                      <div className="flex justify-between"><span>Success Count:</span> <span className="font-bold text-emerald-600">{uploadResult.successCount}</span></div>
-                      <div className="flex justify-between"><span>Failed Count:</span> <span className="font-bold text-rose-500">{uploadResult.failedCount}</span></div>
-                      <div className="flex justify-between"><span>Duplicate Count:</span> <span className="font-bold text-amber-500">{uploadResult.duplicateCount}</span></div>
+                    <div className="space-y-4 pt-1.5 border-t border-stone-200 mt-1.5">
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="bg-emerald-50/50 border border-emerald-100 p-2.5 rounded-lg">
+                          <span className="block text-lg font-black text-emerald-600">{uploadResult.successCount}</span>
+                          <span className="text-[10px] text-[--text-secondary] font-semibold">Success</span>
+                        </div>
+                        <div className="bg-amber-50/50 border border-amber-100 p-2.5 rounded-lg">
+                          <span className="block text-lg font-black text-amber-500">{uploadResult.duplicateCount}</span>
+                          <span className="text-[10px] text-[--text-secondary] font-semibold">Skipped (Dup)</span>
+                        </div>
+                        <div className="bg-red-50/50 border border-red-100 p-2.5 rounded-lg">
+                          <span className="block text-lg font-black text-red-600">{uploadResult.failedCount}</span>
+                          <span className="text-[10px] text-[--text-secondary] font-semibold">Errors</span>
+                        </div>
+                      </div>
                       
-                      {uploadResult.failedCount > 0 && (
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              const res = await axios.get(`/api/v1/leads/csv/logs/${uploadResult.batchId}/failed-rows`);
-                              const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
-                              const url = URL.createObjectURL(blob);
-                              const link = document.createElement('a');
-                              link.setAttribute('href', url);
-                              link.setAttribute('download', `failed-rows-${uploadResult.batchId}.csv`);
-                              document.body.appendChild(link);
-                              link.click();
-                              document.body.removeChild(link);
-                            } catch {
-                              toast.error('Failed to download error log');
-                            }
-                          }}
-                          className="w-full mt-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-center font-bold transition-all text-[9px] uppercase tracking-wider cursor-pointer border border-rose-200"
-                        >
-                          Download Error Log Report
-                        </button>
+                      {uploadResult.errors && uploadResult.errors.length > 0 && (
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] font-bold text-red-600 uppercase tracking-wider block">Error Log Summary:</span>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  const res = await axios.get(`/api/v1/leads/csv/logs/${uploadResult.batchId}/failed-rows`, { responseType: 'blob' });
+                                  const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
+                                  const url = URL.createObjectURL(blob);
+                                  const link = document.createElement('a');
+                                  link.setAttribute('href', url);
+                                  link.setAttribute('download', `failed-rows-${uploadResult.batchId}.csv`);
+                                  document.body.appendChild(link);
+                                  link.click();
+                                  document.body.removeChild(link);
+                                } catch {
+                                  toast.error('Failed to download error log');
+                                }
+                              }}
+                              className="text-[10px] font-bold text-[--accent] hover:underline flex items-center gap-1 bg-transparent border-0 cursor-pointer"
+                            >
+                              <Download size={11} />
+                              <span>Download Full Error Report</span>
+                            </button>
+                          </div>
+                          <div className="border border-red-100 rounded-lg p-3 bg-red-50/20 max-h-[140px] overflow-y-auto text-xs font-mono text-red-600 space-y-1">
+                            {uploadResult.errors.slice(0, 50).map((err, idx) => (
+                              <div key={idx} className="flex gap-2">
+                                <span className="font-bold">Row {err.row}:</span>
+                                <span>{err.reason}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       )}
                     </div>
                   )}

@@ -30,90 +30,48 @@ export const downloadCsvTemplate = async (req, res) => {
     const configsRes = await query('SELECT * FROM field_configs WHERE vertical_id = $1 AND is_csv_mapped = true ORDER BY display_order ASC', [verticalId]);
     const configs = configsRes.rows;
 
-    const { leadType = 'CALL' } = req.query;
+    const isPositive = req.query.leadType === 'POSITIVE';
 
-    let baseHeaders = [];
-    let baseExample = [];
-
-    if (leadType === 'POSITIVE') {
-      baseHeaders = [
-        'DATE',
-        'EMPLOYEE NAME',
-        'BUSINESS TYPE',
-        'BUSINESS / PERSON / SHOP / COMPANY NAME',
-        'AREA',
-        'CITY',
-        'CONTACT',
-        'MAP LOCATION LINK / ADDRESS',
-        'REQUIREMENT',
-        'REMARKS',
-        'FOLLOW UP REQUIRE (YES/NO)',
-        'FOLLOW UP DATE',
-        'FOLLOW UP REMARKS',
-        'Lead Type',
-        'Status',
-      ];
-      baseExample = [
-        '2026-06-05',
-        'Pavan Rag',
-        'Pooja SA',
-        'Sai Balaji Astrology Center Best Astrologer in Bangalore',
-        'btm',
-        'Bangalore',
-        '8867309966',
-        '',
-        "didn't pick",
-        'didn’t pick',
-        'No',
-        '',
-        '',
-        'POSITIVE',
-        'new',
-      ];
-    } else {
-      baseHeaders = [
-        'DATE',
-        'EMPLOYEE NAME',
-        'BUSINESS TYPE',
-        'BUSINESS / PERSON / SHOP / COMPANY NAME',
-        'AREA',
-        'CITY',
-        'CONTACT',
-        'MAP LOCATION LINK / ADDRESS',
-        'REQUIREMENT',
-        'Lead Type',
-        'Status',
-      ];
-      baseExample = [
-        '2026-06-09',
-        'shubhanga v',
-        '',
-        'Sattva Awakening',
-        'Whitefield',
-        '',
-        '81054 16505',
-        'https://share.google/WcGZL21tLNSJM7J9Z',
-        'hanumanth raju told to come after 12pm 10-06-2026 with samples and details',
-        'CALL',
-        'new',
-      ];
-    }
+    const baseHeaders = isPositive ? [
+      'DATE',
+      'EMPLOYEE NAME',
+      'BUSINESS TYPE',
+      'BUSINESS / PERSON / SHOP / COMPANY NAME',
+      'AREA',
+      'CITY',
+      'CONTACT NUMBER',
+      'POINT OF CONTACT',
+      'REMARKS',
+      'RECORDINGS',
+      'FOLLOW-UP REQUIRED',
+      'FOLLOW-UPS',
+      'FOLLOW-UP DATES',
+      'FOLLOW-UP REMARKS',
+      'REQUIREMENT IF ANY',
+      'A NOTES TO THE COS TEAM ONLY'
+    ] : [
+      'DATE',
+      'EMPLOYEE NAME',
+      'BUSINESS TYPE',
+      'BUSINESS / PERSON / SHOP / COMPANY NAME',
+      'CONTACT NUMBER',
+      'POINT OF CONTACT',
+      'AREA',
+      'CITY',
+      'LINK ADDRESS',
+      'REMARKS',
+      'RECORDINGS',
+      'APPOINTMENT TYPE (YES OR NO)',
+      'APPOINTMENT DATE',
+      'APPOINTMENT TIME',
+      'REQUIREMENT ORDER IF ANY',
+      'NOTES TO THE COS IF ANY'
+    ];
 
     const customHeaders = configs.map(c => c.csv_header || c.label);
     const headers = [...baseHeaders, ...customHeaders];
 
-    const customExamples = configs.map(c => {
-      if (c.field_type === 'number') return '123';
-      if (c.field_type === 'boolean') return 'True';
-      if (c.field_type === 'date') return '2026-06-22';
-      return 'Sample Value';
-    });
-    const exampleRow = [...baseExample, ...customExamples];
-
-    const csvContent = [
-      headers.map(h => `"${h.replace(/"/g, '""')}"`).join(','),
-      exampleRow.map(v => `"${v.replace(/"/g, '""')}"`).join(',')
-    ].join('\n') + '\n';
+    const csvContent = headers.map(h => `"${h.replace(/"/g, '""')}"`).join(',') + '\n';
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename=template-${vertical.slug}.csv`);
@@ -258,9 +216,26 @@ export const streamFailedRows = async (req, res) => {
 
     if (errors.length === 0) return res.status(400).json({ success: false, error: 'No errors found' });
 
-    const csvHeader = 'Row,Reason\n';
-    const csvRows = errors.map(e => `"${e.row}","${(e.reason || '').replace(/"/g, '""')}"`).join('\n');
-    const csvContent = csvHeader + csvRows;
+    let csvContent = '';
+    const firstError = errors.find(e => e.originalRow && typeof e.originalRow === 'object');
+    if (firstError) {
+      const originalHeaders = Object.keys(firstError.originalRow);
+      const csvHeader = [...originalHeaders, 'ERROR REASON'].map(h => `"${h.replace(/"/g, '""')}"`).join(',') + '\n';
+      const csvRows = errors.map(e => {
+        const rowData = e.originalRow || {};
+        const values = originalHeaders.map(h => {
+          const val = rowData[h] === undefined || rowData[h] === null ? '' : rowData[h].toString();
+          return `"${val.replace(/"/g, '""')}"`;
+        });
+        values.push(`"${(e.reason || '').replace(/"/g, '""')}"`);
+        return values.join(',');
+      }).join('\n');
+      csvContent = csvHeader + csvRows + '\n';
+    } else {
+      const csvHeader = 'Row,Reason\n';
+      const csvRows = errors.map(e => `"${e.row}","${(e.reason || '').replace(/"/g, '""')}"`).join('\n');
+      csvContent = csvHeader + csvRows + '\n';
+    }
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename=error-report-${batchId}.csv`);

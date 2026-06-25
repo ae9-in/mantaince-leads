@@ -50,7 +50,7 @@ describe('Database Triggers Integration', () => {
         verticalId: testVerticalId,
         subVerticalId: testSubVerticalId,
         leadType: 'CALL',
-        data: {}
+        data: { employeeName: 'shubhanga v' }
       })
       .expect(201);
 

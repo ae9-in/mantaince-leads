@@ -86,7 +86,7 @@ describe('costConversionsController.createCostConversion', () => {
         verticalId: '0f26e60c-09fe-43e3-83c6-b8ece895d365',
         subVerticalId: '00000000-0000-0000-0000-000000000001',
         leadType: 'CALL',
-        data: {}
+        data: { employeeName: 'shubhanga v' }
       }
     });
     const res = mockResponse();

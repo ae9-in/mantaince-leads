@@ -109,6 +109,9 @@ const checkSchemaReady = async () => {
             ) AND EXISTS (
                 SELECT 1 FROM information_schema.columns 
                 WHERE table_name = 'csv_upload_logs' AND column_name = 'lead_type'
+            ) AND EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'users' AND column_name = 'is_approved'
             ) AS ready;
         `);
         return res.rows[0]?.ready || false;
@@ -146,6 +149,7 @@ const runMigrations = async () => {
             role_id UUID NOT NULL REFERENCES roles(id) ON DELETE RESTRICT,
             vertical_access UUID[] DEFAULT '{}',
             is_active BOOLEAN DEFAULT TRUE,
+            is_approved BOOLEAN DEFAULT FALSE,
             last_login_at TIMESTAMP,
             invite_token VARCHAR(255),
             invite_token_expiry TIMESTAMP,
@@ -420,6 +424,17 @@ const runMigrations = async () => {
         ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_token VARCHAR(255);
         ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_token_expiry TIMESTAMP;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS vertical_access UUID[] DEFAULT '{}';
+        
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'users' AND column_name = 'is_approved'
+            ) THEN
+                ALTER TABLE users ADD COLUMN is_approved BOOLEAN DEFAULT TRUE;
+                ALTER TABLE users ALTER COLUMN is_approved SET DEFAULT FALSE;
+            END IF;
+        END $$;
 
         ALTER TABLE sessions ADD COLUMN IF NOT EXISTS token_hash VARCHAR(255);
         ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;

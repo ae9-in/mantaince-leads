@@ -98,10 +98,7 @@ export const uploadCsv = async (req, res) => {
       return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
     }
 
-    let targetAssignedTo = assignedTo;
-    if (req.user.role === 'agent') {
-      targetAssignedTo = req.user.sub;
-    }
+    const targetAssignedTo = (assignedTo && assignedTo.length > 0) ? assignedTo : null;
 
     const logId = crypto.randomUUID();
     const fileName = `${logId}.csv`;

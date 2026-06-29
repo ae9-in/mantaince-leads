@@ -75,6 +75,7 @@ const LeadsView = () => {
 
   // CSV upload state
   const [csvFile, setCsvFile] = useState(null);
+  const [csvAssignedTo, setCsvAssignedTo] = useState('');
   const [uploadingCsv, setUploadingCsv] = useState(false);
   const [csvLogs, setCsvLogs] = useState([]);
   const [uploadError, setUploadError] = useState(null);
@@ -116,10 +117,10 @@ const LeadsView = () => {
       const subs = await api(`/verticals/${currentVertical._id}/subverticals`);
       setSubVerticals(subs.filter(s => s.isActive));
 
-      // Fetch agents (retrieve users list and filter)
+      // Fetch agents — all active users regardless of role
       if (isAdmin) {
         const usersList = await api('/users');
-        setAgents(usersList.filter(u => u.isActive && (u.roleId?.name === 'agent' || u.roleId?.name === 'vertical_admin')));
+        setAgents(usersList.filter(u => u.isActive !== false));
       }
     } catch (err) {
       console.error('Error fetching metadata:', err.message);
@@ -339,6 +340,9 @@ const LeadsView = () => {
       const formData = new FormData();
       formData.append('file', csvFile);
       formData.append('verticalId', currentVertical._id);
+      if (csvAssignedTo) {
+        formData.append('assignedTo', csvAssignedTo);
+      }
 
       await api('/leads/import', {
         method: 'POST',
@@ -346,6 +350,7 @@ const LeadsView = () => {
       });
 
       setCsvFile(null);
+      setCsvAssignedTo('');
       // Success alert
       alert('CSV file uploaded successfully. Processing will run in the background.');
       fetchCsvLogs();
@@ -373,16 +378,16 @@ const LeadsView = () => {
     ];
 
     const baseExample = [
-      'John Doe',
-      '+1234567890',
-      'Acme Corp',
-      'Jane Smith',
-      'Calls',
-      'New',
-      'Acme Corp Office',
-      '2026-06-22',
-      'https://maps.google.com/?q=12.345,67.890',
-      'https://example.com/delivered/report123'
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      ''
     ];
 
     const headers = [...baseHeaders];
@@ -391,15 +396,7 @@ const LeadsView = () => {
     configs.forEach(c => {
       const header = c.isCsvMapped && c.csvHeader ? c.csvHeader : c.label;
       headers.push(header);
-      if (c.fieldType === 'number') {
-        exampleRow.push('123');
-      } else if (c.fieldType === 'boolean') {
-        exampleRow.push('True');
-      } else if (c.fieldType === 'date') {
-        exampleRow.push('2026-06-22');
-      } else {
-        exampleRow.push('Sample Value');
-      }
+      exampleRow.push('');
     });
 
     const csvContent = [
@@ -863,7 +860,30 @@ const LeadsView = () => {
                 </button>
               </div>
 
-              <div 
+              {/* Operator Assignment Dropdown */}
+              {isAdmin && agents.length > 0 && (
+                <div className="form-group">
+                  <label htmlFor="csv-assigned-to">Assign Operator (applies to all rows)</label>
+                  <select
+                    id="csv-assigned-to"
+                    className="form-control"
+                    value={csvAssignedTo}
+                    onChange={(e) => setCsvAssignedTo(e.target.value)}
+                  >
+                    <option value="">— Select operator —</option>
+                    {agents.map(a => (
+                      <option key={a._id} value={a._id}>
+                        {a.name} ({a.email})
+                      </option>
+                    ))}
+                  </select>
+                  <small style={{ color: 'var(--text-dim)', fontSize: '0.78rem', marginTop: '4px', display: 'block' }}>
+                    The selected operator will be assigned to every imported lead row.
+                  </small>
+                </div>
+              )}
+
+              <div
                 className="drag-drop-zone"
                 onClick={() => document.getElementById('csv-file-input').click()}
               >

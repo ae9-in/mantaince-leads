@@ -19,10 +19,11 @@ test.describe('Leads CRUD E2E Flow', () => {
     const vertical = (await vRes.json()).data;
 
     // 3. Create a Sub-Vertical
-    await request.post(`/api/v1/verticals/${vertical.id}/sub-verticals`, {
+    const svRes = await request.post(`/api/v1/verticals/${vertical.id}/sub-verticals`, {
       headers: { Authorization: `Bearer ${accessToken}` },
       data: { name: subVerticalName }
     });
+    const subVertical = (await svRes.json()).data;
 
     // 4. Perform standard login E2E flow
     await page.goto('/login');
@@ -31,8 +32,8 @@ test.describe('Leads CRUD E2E Flow', () => {
     await page.click('button[type="submit"]');
     await page.waitForURL('**/leads**');
     
-    // Select the vertical from the sidebar
-    await page.click(`text=${verticalName}`);
+    // Navigate directly to the selected workspace
+    await page.goto(`/leads?verticalId=${vertical.id}&subVerticalId=${subVertical.id}`);
   });
 
   test('creates new lead successfully', async ({ page }) => {
@@ -41,12 +42,11 @@ test.describe('Leads CRUD E2E Flow', () => {
     const randomPhone = `+1555${uniqueId}`;
 
     await page.click('button:has-text("Add Lead")');
-    await page.fill('label:has-text("Name *") + input', randomName);
-    await page.fill('label:has-text("Number *") + input', randomPhone);
-    await page.fill('label:has-text("Business") + input', 'E2E Corp');
+    await page.fill('label:has-text("BUSINESS / PERSON / SHOP / COMPANY NAME *") + input', randomName);
+    await page.fill('label:has-text("Contact Number *") + input', randomPhone);
     
-    // Select the Sub-Vertical (Mandatory)
-    await page.selectOption('label:has-text("Sub-Vertical") + select', { label: subVerticalName });
+    // Select the Assigned Operator (Mandatory)
+    await page.selectOption('label:has-text("Assigned Operator *") + select', { label: 'Super Administrator' });
 
     await page.click('button:has-text("Save Lead")');
 

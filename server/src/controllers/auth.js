@@ -56,6 +56,11 @@ export const login = async (req, res) => {
       return res.status(401).json({ success: false, error: 'Invalid email or password' });
     }
 
+    if (!user.is_approved) {
+      console.log(`[Login Failed] User not approved. Email: "${email}"`);
+      return res.status(403).json({ success: false, error: 'Your account is pending administrator approval.' });
+    }
+
     const isMatch = await bcrypt.compare(password, user.password_hash);
     if (!isMatch) {
       console.log(`[Login Failed] Password mismatch for email: "${email}". Received password length: ${password?.length}, password: "${password}"`);
@@ -379,74 +384,111 @@ export const changePassword = async (req, res) => {
  * Complete registration using invite token
  */
 export const register = async (req, res) => {
-  const { token, password } = req.body;
+  const { token, name, email, password } = req.body;
   try {
-    if (!token || !password) {
-      return res.status(400).json({ success: false, error: 'Token and password are required' });
-    }
-
-    // Find user by invite token
-    const userRes = await query(`
-      SELECT u.*, r.name as role_name, r.permissions
-      FROM users u
-      JOIN roles r ON u.role_id = r.id
-      WHERE u.invite_token = $1 AND u.invite_token_expiry > NOW()
-    `, [token]);
-
-    const user = userRes.rows[0];
-    if (!user) {
-      return res.status(400).json({ success: false, error: 'Invalid or expired registration token' });
-    }
-
-    const passwordHash = await bcrypt.hash(password, 12);
-    const lastLoginAt = new Date();
-
-    // Update user's password, activate the user, and clear the token
-    await query(`
-      UPDATE users
-      SET password_hash = $1, invite_token = NULL, invite_token_expiry = NULL, is_active = true, last_login_at = $2, updated_at = NOW()
-      WHERE id = $3
-    `, [passwordHash, lastLoginAt, user.id]);
-
-    const accessToken = signAccessToken(user, user.role_name, user.permissions);
-    const refreshToken = signRefreshToken(user.id);
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-
-    // Save session refresh hash
-    await query(`
-      INSERT INTO sessions (id, user_id, token_hash, expires_at, ip, user_agent)
-      VALUES ($1, $2, $3, $4, $5, $6)
-    `, [
-      crypto.randomUUID(),
-      user.id,
-      hashToken(refreshToken),
-      expiresAt,
-      req.ip || '',
-      req.headers['user-agent'] || ''
-    ]);
-
-    setRefreshCookie(res, refreshToken);
-
-    await logAudit(null, {
-      action: 'user.register_complete',
-      targetCollection: 'users',
-      targetId: user.id,
-      after: { email: user.email, name: user.name, role: user.role_name }
-    });
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        accessToken,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role_name,
-          verticalAccess: user.vertical_access
-        }
+    if (token) {
+      if (!password) {
+        return res.status(400).json({ success: false, error: 'Password is required' });
       }
-    });
+
+      // Find user by invite token
+      const userRes = await query(`
+        SELECT u.*, r.name as role_name, r.permissions
+        FROM users u
+        JOIN roles r ON u.role_id = r.id
+        WHERE u.invite_token = $1 AND u.invite_token_expiry > NOW()
+      `, [token]);
+
+      const user = userRes.rows[0];
+      if (!user) {
+        return res.status(400).json({ success: false, error: 'Invalid or expired registration token' });
+      }
+
+      const passwordHash = await bcrypt.hash(password, 12);
+      const lastLoginAt = new Date();
+
+      // Update user's password, activate the user, and clear the token
+      await query(`
+        UPDATE users
+        SET password_hash = $1, invite_token = NULL, invite_token_expiry = NULL, is_active = true, is_approved = true, last_login_at = $2, updated_at = NOW()
+        WHERE id = $3
+      `, [passwordHash, lastLoginAt, user.id]);
+
+      const accessToken = signAccessToken(user, user.role_name, user.permissions);
+      const refreshToken = signRefreshToken(user.id);
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+      // Save session refresh hash
+      await query(`
+        INSERT INTO sessions (id, user_id, token_hash, expires_at, ip, user_agent)
+        VALUES ($1, $2, $3, $4, $5, $6)
+      `, [
+        crypto.randomUUID(),
+        user.id,
+        hashToken(refreshToken),
+        expiresAt,
+        req.ip || '',
+        req.headers['user-agent'] || ''
+      ]);
+
+      setRefreshCookie(res, refreshToken);
+
+      await logAudit(null, {
+        action: 'user.register_complete',
+        targetCollection: 'users',
+        targetId: user.id,
+        after: { email: user.email, name: user.name, role: user.role_name }
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          accessToken,
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role_name,
+            verticalAccess: user.vertical_access
+          }
+        }
+      });
+    } else {
+      if (!name || !email || !password) {
+        return res.status(400).json({ success: false, error: 'Name, email, and password are required' });
+      }
+
+      const existsRes = await query('SELECT id FROM users WHERE email = $1', [email.toLowerCase().trim()]);
+      if (existsRes.rows.length > 0) {
+        return res.status(400).json({ success: false, error: 'User with this email already exists' });
+      }
+
+      const roleRes = await query("SELECT id FROM roles WHERE name = 'agent'");
+      const agentRoleId = roleRes.rows[0]?.id;
+      if (!agentRoleId) {
+        return res.status(500).json({ success: false, error: 'Default agent role not found' });
+      }
+
+      const passwordHash = await bcrypt.hash(password, 12);
+      const userId = crypto.randomUUID();
+
+      await query(`
+        INSERT INTO users (id, name, email, password_hash, role_id, is_active, is_approved)
+        VALUES ($1, $2, $3, $4, $5, true, false)
+      `, [userId, name, email.toLowerCase().trim(), passwordHash, agentRoleId]);
+
+      await logAudit(null, {
+        action: 'user.register_pending',
+        targetCollection: 'users',
+        targetId: userId,
+        after: { email: email.toLowerCase().trim(), name, role: 'agent' }
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: 'Registration successful! Your account is pending administrator approval.'
+      });
+    }
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }

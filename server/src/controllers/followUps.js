@@ -22,10 +22,6 @@ export const getFollowUps = async (req, res) => {
     if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(costConversion.vertical_id))) {
       return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
     }
-    if (req.user.role === 'agent' && costConversion.assigned_to !== req.user.sub) {
-      return res.status(403).json({ success: false, error: 'Access forbidden: this cost/conversion is not assigned to you' });
-    }
-
     let sql = `
       SELECT f.*, 
              u_assign.name as assigned_to_name, u_assign.email as assigned_to_email,
@@ -43,8 +39,7 @@ export const getFollowUps = async (req, res) => {
       params.push(status);
     }
     
-    // Agent role overrides query input to force agent sub
-    const targetAssigned = req.user.role === 'agent' ? req.user.sub : assignedTo;
+    const targetAssigned = assignedTo;
     if (targetAssigned) {
       sql += ` AND f.assigned_to_id = $${pIdx++}`;
       params.push(targetAssigned);
@@ -97,9 +92,7 @@ export const createFollowUp = async (req, res) => {
     if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(costConversion.vertical_id))) {
       return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
     }
-    if (req.user.role === 'agent' && costConversion.assigned_to !== req.user.sub) {
-      return res.status(403).json({ success: false, error: 'Access forbidden: this cost/conversion is not assigned to you' });
-    }
+
 
     const subVerticalId = costConversion.sub_vertical_id;
     if (!subVerticalId) {
@@ -158,9 +151,7 @@ export const updateFollowUp = async (req, res) => {
       if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(costConversion.vertical_id))) {
         return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
       }
-      if (req.user.role === 'agent' && costConversion.assigned_to !== req.user.sub) {
-        return res.status(403).json({ success: false, error: 'Access forbidden: this cost/conversion is not assigned to you' });
-      }
+
     }
 
     const before = { ...followUp };
@@ -271,9 +262,7 @@ export const deleteFollowUp = async (req, res) => {
       if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(costConversion.vertical_id))) {
         return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
       }
-      if (req.user.role === 'agent' && costConversion.assigned_to !== req.user.sub) {
-        return res.status(403).json({ success: false, error: 'Access forbidden: this cost/conversion is not assigned to you' });
-      }
+
     }
 
     await query('DELETE FROM follow_ups WHERE id = $1', [id]);
@@ -316,9 +305,7 @@ export const getFollowUpSummary = async (req, res) => {
     if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(costConversion.vertical_id))) {
       return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
     }
-    if (req.user.role === 'agent' && costConversion.assigned_to !== req.user.sub) {
-      return res.status(403).json({ success: false, error: 'Access forbidden: this cost/conversion is not assigned to you' });
-    }
+
 
     const [pendingRes, totalRes, nextRes] = await Promise.all([
       query(`SELECT COUNT(*)::int as count FROM follow_ups WHERE cost_conversion_id = $1 AND status = 'PENDING'`, [costConversionId]),
@@ -362,8 +349,7 @@ export const getCalendarGrid = async (req, res) => {
     return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
   }
 
-  // Agent role restriction
-  const targetAssigned = req.user.role === 'agent' ? req.user.sub : assignedTo;
+  const targetAssigned = assignedTo;
 
   const cacheKey = `calendar:${verticalId}:${year}-${month}:${targetAssigned || 'all'}:${subVerticalId || 'all'}`;
 
@@ -462,8 +448,7 @@ export const getCalendarFollowUpsByDate = async (req, res) => {
     return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
   }
 
-  // Agent role restriction
-  const targetAssigned = req.user.role === 'agent' ? req.user.sub : assignedTo;
+  const targetAssigned = assignedTo;
 
   try {
     let sql = `

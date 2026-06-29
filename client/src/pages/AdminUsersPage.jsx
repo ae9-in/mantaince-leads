@@ -6,8 +6,6 @@ import {
   ChevronRight, AlertTriangle, AlertCircle, RefreshCw, Briefcase
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import UserAssignmentPanel from '../components/UserAssignmentPanel.jsx';
-
 export const AdminUsersPage = () => {
   const { user: currentAdmin } = useAuthStore();
   const [users, setUsers] = useState([]);
@@ -16,7 +14,6 @@ export const AdminUsersPage = () => {
 
   // Selected user for slide-over drawer
   const [selectedUser, setSelectedUser] = useState(null);
-  const [assignmentUser, setAssignmentUser] = useState(null);
   
   // Drawer edit states
   const [editName, setEditName] = useState('');
@@ -43,14 +40,12 @@ export const AdminUsersPage = () => {
   const fetchUsersAndVerticals = async () => {
     setLoading(true);
     try {
-      const [usersRes, verticalsRes] = await Promise.all([
-        axios.get('/api/v1/users'),
-        axios.get('/api/v1/verticals')
+      const [usersRes] = await Promise.all([
+        axios.get('/api/v1/users')
       ]);
       setUsers(usersRes.data.data);
-      setVerticals(verticalsRes.data.data);
     } catch (err) {
-      toast.error('Failed to retrieve user listing and vertical configurations');
+      toast.error('Failed to retrieve user listing');
     } finally {
       setLoading(false);
     }
@@ -59,6 +54,17 @@ export const AdminUsersPage = () => {
   useEffect(() => {
     fetchUsersAndVerticals();
   }, []);
+
+  const handleApproveUser = async (userId, e) => {
+    e.stopPropagation();
+    try {
+      await axios.patch(`/api/v1/users/${userId}/approve`);
+      toast.success('User approved successfully!');
+      await fetchUsersAndVerticals();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to approve user');
+    }
+  };
 
   const handleSelectUser = (user) => {
     setSelectedUser(user);
@@ -81,23 +87,15 @@ export const AdminUsersPage = () => {
     if (!selectedUser) return;
     setSavingUser(true);
     try {
-      // 1. Update basic info (name, email, isActive)
+      // Update basic info (name, email, isActive)
       await axios.patch(`/api/v1/users/${selectedUser.id}`, {
         name: editName,
         email: editEmail,
         isActive: editActive
       });
 
-      // 2. Update vertical access
-      await axios.patch(`/api/v1/users/${selectedUser.id}/verticals`, {
-        verticalAccess: selectedVerticalIds
-      });
-
       toast.success('User details updated successfully');
       await fetchUsersAndVerticals();
-      // Reload details with fresh references
-      const updated = users.find(u => u.id === selectedUser.id);
-      if (updated) handleSelectUser(updated);
       setSelectedUser(null);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to update user profile details');
@@ -181,8 +179,7 @@ export const AdminUsersPage = () => {
         name: inviteName,
         email: inviteEmail,
         role: inviteRole,
-        password: invitePassword,
-        verticalAccess: inviteVerticals
+        password: invitePassword
       });
       toast.success('User invited and created successfully!');
       setShowInviteModal(false);
@@ -238,7 +235,7 @@ export const AdminUsersPage = () => {
                   <th className="px-6 py-4">Name</th>
                   <th className="px-6 py-4">Email</th>
                   <th className="px-6 py-4">Role</th>
-                  <th className="px-6 py-4">Assignments</th>
+                  <th className="px-6 py-4">Approval</th>
                   <th className="px-6 py-4">Status</th>
                   <th className="px-6 py-4 text-right">Actions</th>
                 </tr>
@@ -267,7 +264,7 @@ export const AdminUsersPage = () => {
                       key={user.id} 
                       onClick={() => handleSelectUser(user)}
                       className={`hover:bg-stone-50/50 cursor-pointer transition-all ${
-                        selectedUser?.id === user.id || assignmentUser?.id === user.id ? 'bg-[--accent-light]' : ''
+                        selectedUser?.id === user.id ? 'bg-[--accent-light]' : ''
                       }`}
                     >
                       <td className="px-6 py-4 text-[--text-primary] font-semibold">
@@ -282,15 +279,18 @@ export const AdminUsersPage = () => {
                         </span>
                       </td>
                       <td className="px-6 py-4">
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); setAssignmentUser(user); }}
-                          className="flex items-center gap-2 px-2 py-1 bg-stone-50 border border-[--border] rounded hover:bg-stone-100 transition-all group"
-                        >
-                          <Briefcase size={12} className="text-[--text-muted] group-hover:text-[--accent]" />
-                          <span className="text-[10px] font-bold text-[--text-secondary]">
-                            {user.assignedSubVerticals?.length || 0} Sub-Verticals
+                        {user.is_approved ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold uppercase rounded-full bg-green-50 text-green-700 border border-green-200">
+                            <Check size={9} /> Approved
                           </span>
-                        </button>
+                        ) : (
+                          <button
+                            onClick={(e) => handleApproveUser(user.id, e)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold uppercase rounded-full bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-all cursor-pointer"
+                          >
+                            <AlertTriangle size={9} /> Pending — Approve
+                          </button>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <span className={`inline-block w-2 h-2 rounded-full ${user.is_active ? 'bg-[#2ecc71]' : 'bg-red-500'}`} />
@@ -386,28 +386,6 @@ export const AdminUsersPage = () => {
                   />
                 </div>
 
-                {/* 5. Verticals multiselect access check list */}
-                {editRole !== 'super_admin' && (
-                  <div className="space-y-2">
-                    <label className="font-bold text-[--text-secondary] uppercase block">Vertical Access Groups</label>
-                    <div className="border border-[--border] rounded-lg p-3 max-h-[160px] overflow-y-auto space-y-2 bg-[--bg-input]">
-                      {verticals.map(vert => {
-                        const checked = selectedVerticalIds.includes(vert.id);
-                        return (
-                          <label key={vert.id} className="flex items-center gap-2 cursor-pointer select-none text-[--text-secondary] hover:text-[--text-primary]">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => handleToggleVertical(vert.id)}
-                              className="rounded border-[--border-strong] bg-[--bg-input] text-[--accent] focus:ring-0 focus:ring-offset-0"
-                            />
-                            <span>{vert.name}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
 
               </div>
             </div>
@@ -451,20 +429,7 @@ export const AdminUsersPage = () => {
           </div>
         )}
 
-        {/* User Assignment Panel Slide-over */}
-        {assignmentUser && (
-          <div className="w-full lg:w-96">
-            <UserAssignmentPanel 
-              user={assignmentUser} 
-              verticals={verticals} 
-              onClose={() => setAssignmentUser(null)} 
-              onSaveSuccess={() => {
-                fetchUsersAndVerticals();
-                setAssignmentUser(null);
-              }}
-            />
-          </div>
-        )}
+
 
       </div>
 
@@ -535,33 +500,7 @@ export const AdminUsersPage = () => {
                 </select>
               </div>
 
-              {inviteRole !== 'super_admin' && (
-                <div className="space-y-2">
-                  <label className="font-bold text-[--text-secondary] uppercase block">Assign Vertical Access</label>
-                  <div className="border border-[--border] rounded-lg p-2.5 max-h-[120px] overflow-y-auto space-y-2 bg-[--bg-input]">
-                    {verticals.map(vert => {
-                      const checked = inviteVerticals.includes(vert.id);
-                      return (
-                        <label key={vert.id} className="flex items-center gap-2 cursor-pointer select-none text-[--text-secondary]">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => {
-                              if (checked) {
-                                setInviteVerticals(inviteVerticals.filter(id => id !== vert.id));
-                              } else {
-                                setInviteVerticals([...inviteVerticals, vert.id]);
-                              }
-                            }}
-                            className="rounded border-[--border-strong] bg-[--bg-input] text-[--accent] focus:ring-0 focus:ring-offset-0"
-                          />
-                          <span>{vert.name}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+
 
               <div className="flex justify-end gap-3 pt-3 border-t border-[--border]">
                 <button

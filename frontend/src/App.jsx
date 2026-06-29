@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './views/Login';
+import Register from './views/Register';
 import DashboardLayout from './views/DashboardLayout';
 import LeadsView from './views/LeadsView';
 import VerticalConfigsView from './views/VerticalConfigsView';
@@ -95,6 +96,12 @@ function App() {
           <Route path="/login" element={
             <PublicRoute>
               <Login />
+            </PublicRoute>
+          } />
+
+          <Route path="/register" element={
+            <PublicRoute>
+              <Register />
             </PublicRoute>
           } />
 

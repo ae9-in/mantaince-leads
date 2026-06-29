@@ -81,18 +81,10 @@ export const getCostConversions = async (req, res) => {
         const shouldCount = includeCount === 'true' || !!req.query.page;
         const dir      = sortDir === 'asc' ? 'ASC' : 'DESC';
         const sortCol  = ['createdAt', 'updatedAt', 'businessName', 'name', 'status'].includes(sortBy) ? SORT_COLUMN_MAP[sortBy] : 'l.created_at';
-        const agentId  = req.user.role === 'agent' ? req.user.sub : null;
-
         // ── Build WHERE clauses dynamically ───────────────────────────────
         const params  = [verticalId];
         const wheres  = ['l.vertical_id = $1', 'l.is_deleted = false'];
         let   pIdx    = 2;
-
-        // RBAC: agent only sees their own cost conversions
-        if (agentId) {
-            wheres.push(`l.assigned_to = $${pIdx++}`);
-            params.push(agentId);
-        }
 
         if (subVerticalId && isValidUUID(subVerticalId)) {
             wheres.push(`l.sub_vertical_id = $${pIdx++}`);
@@ -287,10 +279,14 @@ export const createCostConversion = async (req, res) => {
             return res.status(400).json({ success: false, error: 'Contact number is mandatory' });
         }
 
-        const employeeName = data.employeeName || '';
-        if (!assignedTo && !employeeName.trim()) {
-            return res.status(400).json({ success: false, error: 'Employee name is mandatory' });
+        let targetEmployeeName = '';
+        if (assignedTo && isValidUUID(assignedTo)) {
+            const userRes = await query('SELECT name FROM users WHERE id = $1', [assignedTo]);
+            if (userRes.rows[0]) {
+                targetEmployeeName = userRes.rows[0].name;
+            }
         }
+        data.employeeName = targetEmployeeName || data.employeeName || '';
 
         leadRes = await query(`
             WITH dedup AS (
@@ -427,9 +423,7 @@ export const getCostConversionById = async (req, res) => {
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(lead.vertical_id))) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
         }
-        if (req.user.role === 'agent' && lead.assigned_to !== req.user.sub) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: this Cost/Conversion is not assigned to you' });
-        }
+
 
         return res.status(200).json({ success: true, data: lead });
     } catch (error) {
@@ -456,9 +450,7 @@ export const updateCostConversion = async (req, res) => {
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(lead.vertical_id))) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
         }
-        if (req.user.role === 'agent' && lead.assigned_to !== req.user.sub) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: this Cost/Conversion is not assigned to you' });
-        }
+
 
         if (updates.name !== undefined && (!updates.name || !updates.name.trim())) {
             return res.status(400).json({ success: false, error: 'Business / Person / Shop / Company name is mandatory' });
@@ -479,6 +471,29 @@ export const updateCostConversion = async (req, res) => {
                 return res.status(409).json({ success: false, error: 'Another lead with this phone number already exists' });
             }
             updates.phone = sanitizedPhone;
+        }
+
+        let targetEmployeeName = null;
+        if (updates.assignedTo !== undefined) {
+            if (updates.assignedTo && isValidUUID(updates.assignedTo)) {
+                const userRes = await query('SELECT name FROM users WHERE id = $1', [updates.assignedTo]);
+                if (userRes.rows[0]) {
+                    targetEmployeeName = userRes.rows[0].name;
+                }
+            }
+        } else if (updates.data) {
+            const currentLeadRes = await query('SELECT assigned_to FROM cost_conversions WHERE id = $1', [id]);
+            const currentAssignedTo = currentLeadRes.rows[0]?.assigned_to;
+            if (currentAssignedTo) {
+                const userRes = await query('SELECT name FROM users WHERE id = $1', [currentAssignedTo]);
+                if (userRes.rows[0]) {
+                    targetEmployeeName = userRes.rows[0].name;
+                }
+            }
+        }
+
+        if (targetEmployeeName !== null) {
+            updates.data = { ...(updates.data || {}), employeeName: targetEmployeeName };
         }
 
         const fields = [
@@ -597,9 +612,7 @@ export const deleteCostConversion = async (req, res) => {
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(lead.vertical_id))) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
         }
-        if (req.user.role === 'agent' && lead.assigned_to !== req.user.sub) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: this Cost/Conversion is not assigned to you' });
-        }
+
 
         await query('UPDATE cost_conversions SET is_deleted = true, deleted_at = NOW(), deleted_by = $1 WHERE id = $2', [req.user.sub, id]);
 
@@ -632,9 +645,7 @@ export const updateCostConversionStatus = async (req, res) => {
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(lead.vertical_id))) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
         }
-        if (req.user.role === 'agent' && lead.assigned_to !== req.user.sub) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: this Cost/Conversion is not assigned to you' });
-        }
+
 
         const updatedRes = await query(
             'UPDATE cost_conversions SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
@@ -805,9 +816,7 @@ export const uploadCostConversionPhoto = async (req, res) => {
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(lead.vertical_id))) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
         }
-        if (req.user.role === 'agent' && lead.assigned_to !== req.user.sub) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: this Cost/Conversion is not assigned to you' });
-        }
+
 
         if (!req.file) {
             return res.status(400).json({ success: false, error: 'No file uploaded' });

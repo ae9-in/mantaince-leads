@@ -88,8 +88,20 @@ function buildBulkInsertSql(rows, verticalId, subVerticalId, defaultAssignedTo, 
 /**
  * Queue processor function.
  */
-export const processCsvJob = async (job) => {
+const processCsvJob = async (job) => {
     const { batchId, fileBufferBase64, verticalId, uploadedBy, assignedTo, subVerticalId, leadType = 'CALL' } = job.data;
+    
+    let defaultAssigneeName = '';
+    if (assignedTo) {
+        try {
+            const userRes = await query('SELECT name FROM users WHERE id = $1', [assignedTo]);
+            if (userRes.rows[0]) {
+                defaultAssigneeName = userRes.rows[0].name;
+            }
+        } catch (err) {
+            console.error('Error fetching assignee name in CSV processor:', err.message);
+        }
+    }
 
     let totalRows = 0;
     let successCount = 0;
@@ -225,24 +237,7 @@ export const processCsvJob = async (job) => {
                 continue;
             }
 
-            const rawEmployeeName = row['employee name'] || '';
-            if (!rawEmployeeName.trim()) {
-                errors.push({ row: rowNum, reason: 'Missing employee name', originalRow: rawRow });
-                if (rowNum % 100 === 0 || rowNum === totalRows) {
-                    await cacheSet(`csv_progress:${batchId}`, {
-                        id: batchId,
-                        uploaded_by: uploadedBy,
-                        vertical_id: verticalId,
-                        status: 'processing',
-                        total_rows: totalRows,
-                        success_count: 0,
-                        failed_count: errors.length,
-                        duplicate_count: duplicateCount,
-                        errors: errors
-                    }, 3600);
-                }
-                continue;
-            }
+
 
             if (!rawName.trim()) {
                 errors.push({ row: rowNum, reason: 'Missing business / person / shop / company name', originalRow: rawRow });
@@ -288,7 +283,7 @@ export const processCsvJob = async (job) => {
 
             if (isPositiveLead) {
                 dataMap['date'] = row['date'] || '';
-                dataMap['employeeName'] = row['employee name'] || '';
+                dataMap['employeeName'] = defaultAssigneeName || row['employee name'] || '';
                 dataMap['businessType'] = row['business type'] || '';
                 dataMap['businessName'] = rawBusiness;
                 dataMap['area'] = row['area'] || '';
@@ -304,7 +299,7 @@ export const processCsvJob = async (job) => {
                 dataMap['notes'] = row['a notes to the cos team only'] || row['notes'] || '';
             } else {
                 dataMap['date'] = row['date'] || '';
-                dataMap['employeeName'] = row['employee name'] || '';
+                dataMap['employeeName'] = defaultAssigneeName || row['employee name'] || '';
                 dataMap['businessType'] = row['business type'] || '';
                 dataMap['businessName'] = rawBusiness;
                 dataMap['area'] = row['area'] || '';
@@ -322,7 +317,7 @@ export const processCsvJob = async (job) => {
 
             const empSpokenRaw = row['employee name'] || '';
             const empSpokenName = empSpokenRaw.toLowerCase().trim();
-            const rowAssignedTo = agentMap.get(empSpokenName) || null;
+            const rowAssignedTo = assignedTo || agentMap.get(empSpokenName) || null;
 
             for (const cfg of configs) {
                 const header = (cfg.csv_header || cfg.label).toLowerCase().trim();
@@ -456,4 +451,5 @@ export const processCsvJob = async (job) => {
     }
 };
 
+export { processCsvJob };
 export default processCsvJob;

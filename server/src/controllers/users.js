@@ -13,7 +13,7 @@ export const getUsers = async (req, res) => {
   try {
     let sql = `
       SELECT u.id, u.name, u.email, u.role_id, u.vertical_access,
-             u.is_active, u.last_login_at, u.created_by, u.created_at, u.updated_at,
+             u.is_active, u.is_approved, u.last_login_at, u.created_by, u.created_at, u.updated_at,
              r.name AS role_name,
              COALESCE(
                json_agg(
@@ -35,37 +35,13 @@ export const getUsers = async (req, res) => {
     let whereClauses = [];
     let paramIndex = 1;
 
-    if (req.user.role === 'vertical_admin') {
-      whereClauses.push(`(u.vertical_access && $${paramIndex} OR EXISTS (
-        SELECT 1 FROM user_assignments ua2
-        JOIN sub_verticals sv2 ON ua2.sub_vertical_id = sv2.id
-        WHERE ua2.user_id = u.id AND ua2.is_active = true AND sv2.vertical_id = ANY($${paramIndex})
-      ))`);
-      params.push(req.user.verticalAccess);
-      paramIndex++;
-    } else if (req.user.role === 'agent') {
+    if (req.user.role === 'agent') {
       whereClauses.push(`u.is_active = true`);
-      whereClauses.push(`(u.vertical_access && $${paramIndex} OR EXISTS (
-        SELECT 1 FROM user_assignments ua2
-        JOIN sub_verticals sv2 ON ua2.sub_vertical_id = sv2.id
-        WHERE ua2.user_id = u.id AND ua2.is_active = true AND sv2.vertical_id = ANY($${paramIndex})
-      ))`);
-      params.push(req.user.verticalAccess || []);
-      paramIndex++;
     }
 
     if (role) {
       whereClauses.push(`r.name = $${paramIndex++}`);
       params.push(role);
-    }
-    if (vertical) {
-      whereClauses.push(`($${paramIndex} = ANY(u.vertical_access) OR EXISTS (
-        SELECT 1 FROM user_assignments ua2
-        JOIN sub_verticals sv2 ON ua2.sub_vertical_id = sv2.id
-        WHERE ua2.user_id = u.id AND ua2.is_active = true AND sv2.vertical_id = $${paramIndex}
-      ))`);
-      params.push(vertical);
-      paramIndex++;
     }
     if (active !== undefined) {
       whereClauses.push(`u.is_active = $${paramIndex++}`);
@@ -120,17 +96,9 @@ export const inviteUser = async (req, res) => {
 
     const userId = crypto.randomUUID();
     
-    // Strict Vertical Scoping check for vertical_admin
-    if (req.user.role === 'vertical_admin') {
-      const hasAllAccess = verticalAccess.every(vId => req.user.verticalAccess.includes(vId));
-      if (!hasAllAccess) {
-        return res.status(403).json({ success: false, error: 'Access forbidden: you cannot assign access to verticals you do not manage' });
-      }
-    }
-
     const newUserRes = await query(`
-      INSERT INTO users (id, name, email, password_hash, role_id, vertical_access, created_by, invite_token, invite_token_expiry)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      INSERT INTO users (id, name, email, password_hash, role_id, vertical_access, is_approved, created_by, invite_token, invite_token_expiry)
+      VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, $9)
       RETURNING *
     `, [
       userId, name, email.toLowerCase(), passwordHash, roleDoc.id, verticalAccess, req.user.sub, inviteToken, inviteTokenExpiry
@@ -168,7 +136,7 @@ export const getUserById = async (req, res) => {
   try {
     const userRes = await query(`
       SELECT u.id, u.name, u.email, u.role_id, u.vertical_access,
-             u.is_active, u.last_login_at, u.created_by, u.created_at, u.updated_at,
+             u.is_active, u.is_approved, u.last_login_at, u.created_by, u.created_at, u.updated_at,
              r.name AS role_name, r.permissions
       FROM users u 
       JOIN roles r ON u.role_id = r.id 
@@ -194,18 +162,6 @@ export const getUserById = async (req, res) => {
       verticalId: row.vertical_id
     }));
 
-    // Check vertical scope bounds for vertical_admin / agent
-    if (req.user.role === 'vertical_admin' || req.user.role === 'agent') {
-      const targetUserVerticals = [
-        ...(Array.isArray(userDoc.vertical_access) ? userDoc.vertical_access.map(String) : []),
-        ...(Array.isArray(userDoc.assignedSubVerticals) ? userDoc.assignedSubVerticals.map(sv => String(sv.verticalId)) : [])
-      ];
-      const hasOverlap = targetUserVerticals.some(v => req.user.verticalAccess.includes(v));
-      if (!hasOverlap && userDoc.role_name !== 'super_admin') {
-        return res.status(403).json({ success: false, error: 'Forbidden' });
-      }
-    }
-
     return res.status(200).json({ success: true, data: userDoc });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
@@ -217,7 +173,7 @@ export const getUserById = async (req, res) => {
  */
 export const updateUser = async (req, res) => {
   const { id } = req.params;
-  const { name, email, isActive } = req.body;
+  const { name, email, isActive, isApproved } = req.body;
   try {
     const userRes = await query('SELECT * FROM users WHERE id = $1', [id]);
     const user = userRes.rows[0];
@@ -241,6 +197,10 @@ export const updateUser = async (req, res) => {
     if (isActive !== undefined) {
       setClause.push(`is_active = $${paramIndex++}`);
       params.push(isActive);
+    }
+    if (isApproved !== undefined) {
+      setClause.push(`is_approved = $${paramIndex++}`);
+      params.push(isApproved);
     }
 
     if (setClause.length === 0) {
@@ -460,3 +420,40 @@ export const deleteUser = async (req, res) => {
     return res.status(500).json({ success: false, error: error.message });
   }
 };
+
+/**
+ * PATCH /users/:id/approve
+ */
+export const approveUser = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const userRes = await query('SELECT * FROM users WHERE id = $1', [id]);
+    const user = userRes.rows[0];
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const updatedRes = await query(`
+      UPDATE users SET is_approved = true, updated_at = NOW() 
+      WHERE id = $1 RETURNING *
+    `, [id]);
+    const updatedUser = updatedRes.rows[0];
+
+    await logAudit(req, {
+      action: 'user.approve',
+      targetCollection: 'users',
+      targetId: id,
+      before: user,
+      after: updatedUser
+    });
+
+    await cacheDelete(`user_profile:${id}`);
+
+    broadcastToAll({ type: 'USER_MUTATED' });
+
+    return res.status(200).json({ success: true, data: updatedUser });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+

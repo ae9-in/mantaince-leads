@@ -1,11 +1,12 @@
 import jwt from 'jsonwebtoken';
 import { verifyAccessToken } from '../utils/token.js';
+import { query } from '../config/db.js';
 
 /**
  * Authentication Middleware
  * Validates the JWT Access Token in the Authorization header.
  */
-export const authenticate = (req, res, next) => {
+export const authenticate = async (req, res, next) => {
   let token = null;
   const authHeader = req.headers.authorization;
 
@@ -26,6 +27,11 @@ export const authenticate = (req, res, next) => {
   try {
     const decoded = verifyAccessToken(token);
     req.user = decoded; // Attach payload: { sub, role, permissions, verticalAccess }
+
+    // Always grant access to all verticals to bypass vertical scoping completely
+    const vertRes = await query('SELECT id FROM verticals');
+    req.user.verticalAccess = vertRes.rows.map(v => v.id);
+
     next();
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {

@@ -8,6 +8,7 @@ import Loader from './components/Loader.jsx';
 // Lazy load layouts and views to implement code splitting (Section 12 specifications)
 const AppLayout = lazy(() => import('./layouts/AppLayout.jsx'));
 const LoginPage = lazy(() => import('./pages/LoginPage.jsx'));
+const RegisterPage = lazy(() => import('./pages/RegisterPage.jsx'));
 const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage.jsx'));
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage.jsx'));
 
@@ -96,6 +97,11 @@ export const App = () => {
             <Route path="/login" element={
               <PublicRoute>
                 <LoginPage />
+              </PublicRoute>
+            } />
+            <Route path="/register" element={
+              <PublicRoute>
+                <RegisterPage />
               </PublicRoute>
             } />
             <Route path="/forgot-password" element={

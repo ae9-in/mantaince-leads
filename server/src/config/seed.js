@@ -33,9 +33,9 @@ export const seedDatabase = async () => {
     const passwordHash = await bcrypt.hash('admin123', 12);
     
     await query(`
-        INSERT INTO users (id, name, email, password_hash, role_id, is_active)
-        VALUES ($1, $2, $3, $4, $5, true)
-        ON CONFLICT (email) DO UPDATE SET password_hash = $4, role_id = $5, updated_at = NOW()
+        INSERT INTO users (id, name, email, password_hash, role_id, is_active, is_approved)
+        VALUES ($1, $2, $3, $4, $5, true, true)
+        ON CONFLICT (email) DO UPDATE SET password_hash = $4, role_id = $5, is_approved = true, updated_at = NOW()
     `, [crypto.randomUUID(), 'Super Administrator', adminEmail, passwordHash, rolesToSeed[0].id]);
     
     console.log('👤 Default Super Admin verified (admin@gmail.com / admin123).');
@@ -47,6 +47,14 @@ export const seedDatabase = async () => {
         VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (slug) DO NOTHING
     `, [vId, 'Real Estate', 'real-estate', 'Property listings leads', '#185FA5', 'Home']);
+
+    // Create Test Vertical
+    const testVId = '0f26e60c-09fe-43e3-83c6-b8ece895d365';
+    await query(`
+        INSERT INTO verticals (id, name, slug, description, color, icon)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (slug) DO NOTHING
+    `, [testVId, 'test vertical', 'test-vertical', 'Test environment vertical', '#8B5CF6', 'Beaker']);
 
     console.log('🚀 Seeding completed successfully.');
   } catch (error) {

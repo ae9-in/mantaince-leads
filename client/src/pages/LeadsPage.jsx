@@ -34,6 +34,7 @@ import { useUiStore } from '../store/uiStore.js';
 import toast from 'react-hot-toast';
 import GeotagCapture from '../components/GeotagCapture.jsx';
 import VerticalSelectionBar from '../components/VerticalSelectionBar.jsx';
+import SearchableOperatorSelect from '../components/SearchableOperatorSelect.jsx';
 
 const BASE_DYNAMIC_FIELDS = [
   { key: 'date', label: 'Date', type: 'date', defaultValue: '' },
@@ -193,12 +194,11 @@ export const LeadsPage = () => {
   const activeFiltersCount = useMemo(() => {
     return [
       statusFilter,
-      agentFilter,
       leadTypeFilter,
       dateFromFilter,
       dateToFilter,
     ].filter(Boolean).length;
-  }, [statusFilter, agentFilter, leadTypeFilter, dateFromFilter, dateToFilter]);
+  }, [statusFilter, leadTypeFilter, dateFromFilter, dateToFilter]);
 
   const [bulkAssignModal, setBulkAssignModal] = useState(false);
   const [bulkStatusModal, setBulkStatusModal] = useState(false);
@@ -211,14 +211,13 @@ export const LeadsPage = () => {
   const [leadFormName, setLeadFormName] = useState('');
   const [leadFormPhone, setLeadFormPhone] = useState('');
   const [leadFormBusiness, setLeadFormBusiness] = useState('');
-  const [leadFormAssignedTo, setLeadFormAssignedTo] = useState('');
-  const [employeeNameInput, setEmployeeNameInput] = useState('');
   const [leadFormDynamic, setLeadFormDynamic] = useState(createBaseDynamicDefaults());
   const [formErrors, setFormErrors] = useState([]);
   const [leadFormLeadType, setLeadFormLeadType] = useState('CALL');
   const [leadFormGeotagCoords, setLeadFormGeotagCoords] = useState(null);
   const [leadFormGeotagFile, setLeadFormGeotagFile] = useState(null);
   const [leadFormStatus, setLeadFormStatus] = useState('new');
+  const [leadFormAssignedTo, setLeadFormAssignedTo] = useState('');
 
   // CSV Import Modal states
   const [csvImportModalOpen, setCsvImportModalOpen] = useState(false);
@@ -338,25 +337,16 @@ export const LeadsPage = () => {
     fetchMetadata();
   }, [activeVertical, isAdmin]);
 
-  // Fetch agents scoped to the active vertical, filtered by sub-vertical when one is selected
+  // Fetch ALL active users (always full list for operator dropdown)
   useEffect(() => {
     let cancelled = false;
     const fetchAgents = async () => {
-      if (!activeVertical) return;
-      const subId = leadFormSubVerticalId || subVerticalFilter;
       try {
-        let url;
-        if (subId) {
-          // Sub-vertical selected — fetch assigned agents + admins for that sub-vertical
-          url = `/api/v1/admin/sub-verticals/${subId}/users`;
-        } else {
-          // No sub-vertical — fetch all active users for the vertical
-          url = `/api/v1/users?vertical=${activeVertical._id}&active=true`;
-        }
-        const res = await axios.get(url);
+        const res = await axios.get('/api/v1/users?active=true');
         if (!cancelled) {
-          setAgents((res.data.data || []).filter(u => u.is_active !== false));
-          setAllAgents((res.data.data || []).filter(u => u.is_active !== false));
+          const list = (res.data.data || []).filter(u => u.is_active !== false && u.is_approved !== false);
+          setAgents(list);
+          setAllAgents(list);
         }
       } catch (err) {
         console.error('Error fetching agents:', err);
@@ -365,7 +355,7 @@ export const LeadsPage = () => {
     };
     fetchAgents();
     return () => { cancelled = true; };
-  }, [activeVertical, leadFormSubVerticalId, subVerticalFilter]);
+  }, [leadsRefreshTrigger]);
 
   useEffect(() => {
     fetchLeads();
@@ -420,7 +410,6 @@ export const LeadsPage = () => {
     setLeadFormBusiness('');
     setLeadFormSubVerticalId('');
     setLeadFormAssignedTo('');
-    setEmployeeNameInput('');
     setLeadFormLeadType('CALL');
     setLeadFormGeotagCoords(null);
     setLeadFormGeotagFile(null);
@@ -436,10 +425,7 @@ export const LeadsPage = () => {
     setLeadFormPhone(lead.phone || '');
     setLeadFormBusiness(lead.businessName || lead.business_name || '');
     setLeadFormSubVerticalId(lead.subVerticalId?._id || lead.subVerticalId || lead.sub_vertical_id || '');
-    const assignedId = lead.assigned_to || lead.assignedTo || '';
-    setLeadFormAssignedTo(assignedId);
-    const matchedAgent = agents.find(ag => ag.id === assignedId || ag._id === assignedId);
-    setEmployeeNameInput(matchedAgent ? matchedAgent.name : (lead.data?.employeeName || ''));
+    setLeadFormAssignedTo(lead.assigned_to || lead.assignedTo || '');
     setLeadFormLeadType(lead.lead_type || lead.leadType || 'CALL');
     setLeadFormGeotagCoords(
       lead.geotag_lat || lead.geotagLat
@@ -468,7 +454,6 @@ export const LeadsPage = () => {
       subVerticalId: leadFormSubVerticalId || subVerticalFilter || null,
       data: {
         ...leadFormDynamic,
-        employeeName: employeeNameInput || '',
       },
       assignedTo: leadFormAssignedTo || null,
       leadType: leadFormLeadType,
@@ -502,8 +487,7 @@ export const LeadsPage = () => {
         status: payload.status,
         lead_type: payload.leadType,
         data: { ...l.data, ...payload.data },
-        assigned_to: payload.assignedTo,
-        assignee_name: employeeNameInput || '',
+        assigned_to: null,
         _optimistic: true
       } : l);
       setLeads(updatedLeads);
@@ -520,8 +504,7 @@ export const LeadsPage = () => {
         data: payload.data,
         vertical_id: payload.verticalId,
         sub_vertical_id: payload.subVerticalId,
-        assigned_to: payload.assignedTo,
-        assignee_name: employeeNameInput || '',
+        assigned_to: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         _optimistic: true
@@ -807,18 +790,6 @@ export const LeadsPage = () => {
         cell: ({ row }) => formatDynamicValue('date', getLeadData(row.original, 'date')),
       },
       {
-        accessorKey: 'assignee_name',
-        header: 'EMPLOYEE NAME',
-        cell: ({ row }) => (
-          <div className="flex items-center gap-1.5">
-            <div className="w-5 h-5 rounded bg-stone-100 flex items-center justify-center text-[8px] border border-stone-200 font-bold">
-              {(row.original.assignee_name || row.original.data?.employeeName)?.slice(0, 1) || '?'}
-            </div>
-            <span>{row.original.assignee_name || row.original.data?.employeeName || 'Unassigned'}</span>
-          </div>
-        ),
-      },
-      {
         id: 'businessType',
         header: 'BUSINESS TYPE',
         cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'businessType')),
@@ -1092,14 +1063,6 @@ export const LeadsPage = () => {
               </select>
             </FilterInput>
 
-            <FilterInput label="Employee Name">
-              <select value={agentFilter} onChange={(event) => updateQueryParam('assignedTo', event.target.value)} className="w-full">
-                <option value="">All Agents</option>
-                {agents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>{agent.name}</option>
-                ))}
-              </select>
-            </FilterInput>
 
             <FilterInput label="Lead Type">
               <select value={leadTypeFilter} onChange={(event) => updateQueryParam('leadType', event.target.value)} className="w-full">
@@ -1183,7 +1146,6 @@ export const LeadsPage = () => {
             </div>
             <div className="flex flex-wrap gap-2">
               <button onClick={() => setBulkStatusModal(true)} className="px-3 py-1.5 bg-black/10 hover:bg-black/20 rounded text-xs uppercase">Change Status</button>
-              <button onClick={() => setBulkAssignModal(true)} className="px-3 py-1.5 bg-black/10 hover:bg-black/20 rounded text-xs uppercase">Assign User</button>
               {isAdmin && (
                 <button onClick={() => setBulkDeleteDialog(true)} className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs uppercase">Delete</button>
               )}
@@ -1265,7 +1227,7 @@ export const LeadsPage = () => {
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FilterInput label="Select Target Sub-Vertical *">
                     <select 
                       required
@@ -1291,8 +1253,17 @@ export const LeadsPage = () => {
                     </select>
                   </FilterInput>
 
-
                 </div>
+
+                {/* Assign Operator row */}
+                <FilterInput label="Assign Operator (optional)">
+                  <SearchableOperatorSelect
+                    agents={agents}
+                    value={assignTarget}
+                    onChange={setAssignTarget}
+                    placeholder="-- Unassigned --"
+                  />
+                </FilterInput>
 
                 <div className="flex items-center justify-between pt-2">
                   <button
@@ -1451,27 +1422,6 @@ export const LeadsPage = () => {
                       value={getDynamicValue(leadFormDynamic, 'date')}
                       onChange={(event) => handleDynamicChange('date', event.target.value)}
                     />
-                  </FormField>
-
-                  <FormField label="Employee Name *">
-                    <input
-                      type="text"
-                      required
-                      list="leads-agents-list"
-                      value={employeeNameInput}
-                      onChange={(event) => {
-                        const val = event.target.value;
-                        setEmployeeNameInput(val);
-                        const matched = agents.find(ag => ag.name.toLowerCase().trim() === val.toLowerCase().trim());
-                        setLeadFormAssignedTo(matched ? matched.id : '');
-                      }}
-                      placeholder="Type or select employee..."
-                    />
-                    <datalist id="leads-agents-list">
-                      {agents.map(ag => (
-                        <option key={ag.id} value={ag.name} />
-                      ))}
-                    </datalist>
                   </FormField>
 
                   <FormField label="Business Type">
@@ -1634,6 +1584,15 @@ export const LeadsPage = () => {
                       <option value="FIELD">Field Visit</option>
                     </select>
                   </FormField>
+
+                  <FormField label="Assign Operator">
+                    <SearchableOperatorSelect
+                      agents={agents}
+                      value={leadFormAssignedTo}
+                      onChange={setLeadFormAssignedTo}
+                      placeholder="-- Unassigned --"
+                    />
+                  </FormField>
                 </FormSection>
 
                 {customConfigs.length > 0 && (
@@ -1674,23 +1633,6 @@ export const LeadsPage = () => {
         onCancel={() => setBulkDeleteDialog(false)}
       />
 
-      {bulkAssignModal && (
-        <Modal title="Bulk Assign Leads" onClose={() => setBulkAssignModal(false)}>
-          <p className="text-xs text-[--text-secondary] mb-4">Choose an active member to assign all {selectedRowIds.length} checked leads.</p>
-          <FilterInput label="Select Operator">
-            <select value={bulkAssignTarget} onChange={(event) => setBulkAssignTarget(event.target.value)} className="w-full">
-              <option value="">-- Unassign All --</option>
-              {agents.map((agent) => (
-                <option key={agent.id} value={agent.id}>{agent.name}</option>
-              ))}
-            </select>
-          </FilterInput>
-          <div className="flex justify-end gap-3 mt-6">
-            <button onClick={() => setBulkAssignModal(false)} className="px-4 py-2 border border-[--border-strong] hover:bg-stone-50 rounded-lg text-xs font-semibold text-[--text-secondary]">Cancel</button>
-            <button onClick={handleBulkAssign} className="px-4 py-2 bg-[--accent] text-white font-bold rounded-lg text-xs hover:bg-[--accent-hover]">Reassign</button>
-          </div>
-        </Modal>
-      )}
 
       {bulkStatusModal && (
         <Modal title="Bulk Change Status" onClose={() => setBulkStatusModal(false)}>

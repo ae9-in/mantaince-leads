@@ -75,6 +75,7 @@ describe('costConversionsController.createCostConversion', () => {
   it('creates cost conversion and records audit log', async () => {
     const mockLead = { id: 'new-lead-id', name: 'Test Corp' };
     vi.mocked(query)
+      .mockResolvedValueOnce({ rows: [{ name: 'Operator Bob' }] }) // query for user name lookup
       .mockResolvedValueOnce({ rows: [mockLead] }) // insert lead via atomic dedup CTE
       .mockResolvedValueOnce({ rows: [] }); // custom fields checking query
 
@@ -85,6 +86,7 @@ describe('costConversionsController.createCostConversion', () => {
         phone: '+15550100',
         verticalId: '0f26e60c-09fe-43e3-83c6-b8ece895d365',
         subVerticalId: '00000000-0000-0000-0000-000000000001',
+        assignedTo: '00000000-0000-0000-0000-000000000002',
         leadType: 'CALL',
         data: { employeeName: 'shubhanga v' }
       }

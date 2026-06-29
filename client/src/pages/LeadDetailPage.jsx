@@ -35,8 +35,6 @@ export const LeadDetailPage = () => {
   // Metadata dropdown lists
   const [subVerticals, setSubVerticals] = useState([]);
   const [agents, setAgents] = useState([]);
-  const [employeeNameInput, setEmployeeNameInput] = useState('');
-  
   // Sub-vertical specific custom fields and stages
   const [customFields, setCustomFields] = useState([]);
   const [stages, setStages] = useState([]);
@@ -106,18 +104,12 @@ export const LeadDetailPage = () => {
           businessName: leadData.business_name || leadData.businessName || '',
           status: leadData.status,
           subVerticalId: leadData.sub_vertical_id || '',
-          assignedTo: leadData.assigned_to || '',
+          assignedTo: null,
           leadType: leadData.lead_type || 'CALL',
           stageId: leadData.stage_id || leadData.stageId || '',
           customValues: leadData.customValues || {},
           data: leadData.data || {}
         });
-        const allPossibleUsers = [
-          ...(usersRes.data.data || []),
-          ...(subUsersRes.data.data || [])
-        ];
-        const matched = allPossibleUsers.find(u => (u.id || u._id) === leadData.assigned_to);
-        setEmployeeNameInput(matched ? matched.name : '');
       }
     } catch (err) {
       console.error('Error fetching lead details:', err);
@@ -182,14 +174,13 @@ export const LeadDetailPage = () => {
         phone: formData.phone,
         businessName: formData.name, // keep name and businessName in sync
         subVerticalId: formData.subVerticalId || null,
-        assignedTo: formData.assignedTo || null,
-        status: lead.status, // preserve status as it is not assignable in profile
+        assignedTo: null,
+        status: lead.status,
         leadType: lead.lead_type === 'POSITIVE' ? 'POSITIVE' : (formData.leadType || 'CALL'),
         stageId: formData.stageId || null,
         customValues: formData.customValues || {},
         data: {
           ...(formData.data || {}),
-          employeeName: employeeNameInput || '',
         }
       };
 
@@ -466,42 +457,6 @@ export const LeadDetailPage = () => {
                       viewContent={<span className="text-sm text-[--text-primary] py-2">{formatDate(lead.data?.date)}</span>}
                     />
 
-                    {/* 2. Employee name */}
-                    <FormField
-                      label="Employee Name *"
-                      editMode={editMode}
-                      editContent={
-                        <>
-                          <input type="hidden" {...register('assignedTo', { required: 'Employee name is required' })} />
-                          <input
-                            type="text"
-                            required
-                            list="detail-agents-list"
-                            value={employeeNameInput}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setEmployeeNameInput(val);
-                              const possibleUsers = watchedSubVerticalId ? subVerticalUsers : agents;
-                              const matched = possibleUsers.find(u => u.name.toLowerCase().trim() === val.toLowerCase().trim());
-                              setValue('assignedTo', matched ? (matched.id || matched._id) : '', { shouldValidate: true });
-                            }}
-                            placeholder="Type or select employee..."
-                          />
-                          <datalist id="detail-agents-list">
-                            {(watchedSubVerticalId ? subVerticalUsers : agents).map(ag => (
-                              <option key={ag.id || ag._id} value={ag.name} />
-                            ))}
-                          </datalist>
-                        </>
-                      }
-                      viewContent={
-                        <div className="flex items-center gap-1.5 py-2 text-sm text-[--text-primary]">
-                          <UserIcon size={14} className="text-[--accent]" />
-                          <span>{lead.assignee_name || lead.data?.employeeName || 'Unassigned'}</span>
-                        </div>
-                      }
-                    />
-
                     {/* 3. Business type */}
                     <FormField
                       label="Business Type"
@@ -635,42 +590,6 @@ export const LeadDetailPage = () => {
                       editMode={editMode}
                       editContent={<input type="date" {...register('data.date')} />}
                       viewContent={<span className="text-sm text-[--text-primary] py-2">{formatDate(lead.data?.date)}</span>}
-                    />
-
-                    {/* 2. Employee name */}
-                    <FormField
-                      label="Employee Name *"
-                      editMode={editMode}
-                      editContent={
-                        <>
-                          <input type="hidden" {...register('assignedTo', { required: 'Employee name is required' })} />
-                          <input
-                            type="text"
-                            required
-                            list="detail-agents-list"
-                            value={employeeNameInput}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setEmployeeNameInput(val);
-                              const possibleUsers = watchedSubVerticalId ? subVerticalUsers : agents;
-                              const matched = possibleUsers.find(u => u.name.toLowerCase().trim() === val.toLowerCase().trim());
-                              setValue('assignedTo', matched ? (matched.id || matched._id) : '', { shouldValidate: true });
-                            }}
-                            placeholder="Type or select employee..."
-                          />
-                          <datalist id="detail-agents-list">
-                            {(watchedSubVerticalId ? subVerticalUsers : agents).map(ag => (
-                              <option key={ag.id || ag._id} value={ag.name} />
-                            ))}
-                          </datalist>
-                        </>
-                      }
-                      viewContent={
-                        <div className="flex items-center gap-1.5 py-2 text-sm text-[--text-primary]">
-                          <UserIcon size={14} className="text-[--accent]" />
-                          <span>{lead.assignee_name || lead.data?.employeeName || 'Unassigned'}</span>
-                        </div>
-                      }
                     />
 
                     {/* 3. Business type */}
@@ -819,7 +738,6 @@ export const LeadDetailPage = () => {
               {/* Validation Errors for Main Form Fields */}
               <div className="flex flex-col gap-1">
                 {errors.name && <span className="text-red-500 text-xs font-semibold">{errors.name.message}</span>}
-                {errors.assignedTo && <span className="text-red-500 text-xs font-semibold">{errors.assignedTo.message}</span>}
                 {errors.phone && <span className="text-red-500 text-xs font-semibold">{errors.phone.message}</span>}
               </div>
             </div>

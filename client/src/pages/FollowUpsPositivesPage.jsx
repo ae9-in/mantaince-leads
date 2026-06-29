@@ -34,7 +34,7 @@ import { useUiStore } from '../store/uiStore.js';
 import toast from 'react-hot-toast';
 import GeotagCapture from '../components/GeotagCapture.jsx';
 import VerticalSelectionBar from '../components/VerticalSelectionBar.jsx';
-import EmployeeDropdown from '../components/EmployeeDropdown.jsx';
+import SearchableOperatorSelect from '../components/SearchableOperatorSelect.jsx';
 
 const BASE_DYNAMIC_FIELDS = [
   { key: 'date', label: 'Date', type: 'date', defaultValue: '' },
@@ -190,12 +190,11 @@ export const FollowUpsPositivesPage = () => {
   const activeFiltersCount = useMemo(() => {
     return [
       statusFilter,
-      agentFilter,
       dateFromFilter,
       dateToFilter,
       followUpDateFilter,
     ].filter(Boolean).length;
-  }, [statusFilter, agentFilter, dateFromFilter, dateToFilter, followUpDateFilter]);
+  }, [statusFilter, dateFromFilter, dateToFilter, followUpDateFilter]);
 
   const [bulkAssignModal, setBulkAssignModal] = useState(false);
   const [bulkStatusModal, setBulkStatusModal] = useState(false);
@@ -209,7 +208,6 @@ export const FollowUpsPositivesPage = () => {
   const [leadFormPhone, setLeadFormPhone] = useState('');
   const [leadFormBusiness, setLeadFormBusiness] = useState('');
   const [leadFormAssignedTo, setLeadFormAssignedTo] = useState('');
-  const [employeeNameInput, setEmployeeNameInput] = useState('');
   const [leadFormDynamic, setLeadFormDynamic] = useState(createBaseDynamicDefaults());
   const [formErrors, setFormErrors] = useState([]);
   const [leadFormGeotagCoords, setLeadFormGeotagCoords] = useState(null);
@@ -274,7 +272,6 @@ export const FollowUpsPositivesPage = () => {
         limit: String(limit),
         status: statusFilter,
         subVerticalId: subVerticalFilter,
-        assignedTo: agentFilter,
         search,
         sortBy,
         sortDir,
@@ -320,8 +317,6 @@ export const FollowUpsPositivesPage = () => {
       
       const params = { year, month };
       if (subVerticalFilter) params.subVerticalId = subVerticalFilter;
-      if (agentFilter) params.assignedTo = agentFilter;
-
       const res = await axios.get(
         `/api/v1/followUps/verticals/${activeVertical._id}/follow-ups/calendar`,
         { params }
@@ -332,7 +327,7 @@ export const FollowUpsPositivesPage = () => {
     } finally {
       setLoadingCalendar(false);
     }
-  }, [activeVertical, currentDate, subVerticalFilter, agentFilter]);
+  }, [activeVertical, currentDate, subVerticalFilter]);
 
   useEffect(() => {
     if (!activeVertical) return;
@@ -369,22 +364,14 @@ export const FollowUpsPositivesPage = () => {
     fetchMetadata();
   }, [activeVertical, isAdmin]);
 
-  // Fetch agents scoped to the active vertical, filtered by sub-vertical when one is selected
+  // Fetch ALL active users (always full list for operator dropdown)
   useEffect(() => {
     let cancelled = false;
     const fetchAgents = async () => {
-      if (!activeVertical) return;
-      const subId = leadFormSubVerticalId || subVerticalFilter;
       try {
-        let url;
-        if (subId) {
-          url = `/api/v1/admin/sub-verticals/${subId}/users`;
-        } else {
-          url = `/api/v1/users?vertical=${activeVertical._id}&active=true`;
-        }
-        const res = await axios.get(url);
+        const res = await axios.get('/api/v1/users?active=true');
         if (!cancelled) {
-          const list = (res.data.data || []).filter(u => u.is_active !== false);
+          const list = (res.data.data || []).filter(u => u.is_active !== false && u.is_approved !== false);
           setAgents(list);
           setAllAgents(list);
         }
@@ -395,7 +382,7 @@ export const FollowUpsPositivesPage = () => {
     };
     fetchAgents();
     return () => { cancelled = true; };
-  }, [activeVertical, leadFormSubVerticalId, subVerticalFilter]);
+  }, [leadsRefreshTrigger]);
 
   useEffect(() => {
     fetchLeads();
@@ -457,7 +444,6 @@ export const FollowUpsPositivesPage = () => {
     setLeadFormBusiness('');
     setLeadFormSubVerticalId('');
     setLeadFormAssignedTo('');
-    setEmployeeNameInput('');
     setLeadFormGeotagCoords(null);
     setLeadFormGeotagFile(null);
     setLeadFormDynamic(buildInitialDynamic());
@@ -473,10 +459,7 @@ export const FollowUpsPositivesPage = () => {
     setLeadFormPhone(lead.phone || '');
     setLeadFormBusiness(lead.businessName || lead.business_name || '');
     setLeadFormSubVerticalId(lead.subVerticalId?._id || lead.subVerticalId || lead.sub_vertical_id || '');
-    const assignedId = lead.assigned_to || lead.assignedTo || '';
-    setLeadFormAssignedTo(assignedId);
-    const matchedAgent = agents.find(ag => ag.id === assignedId || ag._id === assignedId);
-    setEmployeeNameInput(matchedAgent ? matchedAgent.name : (lead.data?.employeeName || ''));
+    setLeadFormAssignedTo(lead.assigned_to || lead.assignedTo || '');
     setLeadFormLeadType(lead.lead_type || lead.leadType || 'POSITIVE');
     setLeadFormGeotagCoords(
       lead.geotag_lat || lead.geotagLat
@@ -505,7 +488,6 @@ export const FollowUpsPositivesPage = () => {
       subVerticalId: leadFormSubVerticalId || subVerticalFilter || null,
       data: {
         ...leadFormDynamic,
-        employeeName: employeeNameInput || '',
       },
       assignedTo: leadFormAssignedTo || null,
       leadType: leadFormLeadType || 'POSITIVE',
@@ -538,8 +520,7 @@ export const FollowUpsPositivesPage = () => {
         status: payload.status,
         lead_type: payload.leadType,
         data: { ...l.data, ...payload.data },
-        assigned_to: payload.assignedTo,
-        assignee_name: employeeNameInput || '',
+        assigned_to: null,
         _optimistic: true
       } : l);
       setLeads(updatedLeads);
@@ -556,8 +537,7 @@ export const FollowUpsPositivesPage = () => {
         data: payload.data,
         vertical_id: payload.verticalId,
         sub_vertical_id: payload.subVerticalId,
-        assigned_to: payload.assignedTo,
-        assignee_name: employeeNameInput || '',
+        assigned_to: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         _optimistic: true
@@ -885,18 +865,7 @@ export const FollowUpsPositivesPage = () => {
         header: 'DATE',
         cell: ({ row }) => formatDynamicValue('date', getLeadData(row.original, 'date')),
       },
-      {
-        accessorKey: 'assignee_name',
-        header: 'EMPLOYEE NAME',
-        cell: ({ row }) => (
-          <div className="flex items-center gap-1.5">
-            <div className="w-5 h-5 rounded bg-stone-100 flex items-center justify-center text-[8px] border border-stone-200 font-bold">
-              {(row.original.assignee_name || row.original.data?.employeeName)?.slice(0, 1) || '?'}
-            </div>
-            <span>{row.original.assignee_name || row.original.data?.employeeName || 'Unassigned'}</span>
-          </div>
-        ),
-      },
+
       {
         id: 'businessType',
         header: 'BUSINESS TYPE',
@@ -1156,13 +1125,7 @@ export const FollowUpsPositivesPage = () => {
               <span className="text-[10px] font-black uppercase text-[--text-secondary] px-2">
                 {selectedRowIds.length} selected
               </span>
-              <button
-                type="button"
-                onClick={() => setBulkAssignModal(true)}
-                className="px-3 py-1.5 border border-[--border-strong] rounded-md text-xs font-bold hover:bg-stone-100 bg-white"
-              >
-                Assign Employee
-              </button>
+
               <button
                 type="button"
                 onClick={() => setBulkStatusModal(true)}
@@ -1246,15 +1209,6 @@ export const FollowUpsPositivesPage = () => {
             </select>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <span className="text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Employee Name</span>
-            <EmployeeDropdown 
-              employees={agents.map(a => ({ id: a.id || a._id, name: a.name, role: a.role_name || a.role }))}
-              value={agentFilter}
-              onChange={(id) => updateQueryParam('assignedTo', id)}
-              placeholder="All employees"
-            />
-          </div>
 
           <div className="flex flex-col gap-1.5">
             <span className="text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Lead Status</span>
@@ -1552,7 +1506,7 @@ export const FollowUpsPositivesPage = () => {
 
             <form onSubmit={handleLeadSubmit} className="flex flex-col flex-1 overflow-hidden min-h-0">
               <div className="flex-1 overflow-y-auto pr-3 space-y-4 py-1">
-                {/* Row 1: Date + Employee Name */}
+                {/* Row 1: Date only */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
                     <span className="text-[10px] font-black uppercase text-[--text-secondary]">Date</span>
@@ -1562,28 +1516,6 @@ export const FollowUpsPositivesPage = () => {
                       onChange={(e) => handleDynamicChange('date', e.target.value)}
                       className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
                     />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Employee Name *</span>
-                    <input
-                      type="text"
-                      required
-                      list="positives-agents-list"
-                      value={employeeNameInput}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setEmployeeNameInput(val);
-                        const matched = agents.find(ag => ag.name.toLowerCase().trim() === val.toLowerCase().trim());
-                        setLeadFormAssignedTo(matched ? (matched.id || matched._id) : '');
-                      }}
-                      placeholder="Type or select employee..."
-                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                    />
-                    <datalist id="positives-agents-list">
-                      {agents.map(ag => (
-                        <option key={ag.id || ag._id} value={ag.name} />
-                      ))}
-                    </datalist>
                   </div>
                 </div>
 
@@ -1766,12 +1698,12 @@ export const FollowUpsPositivesPage = () => {
                 </div>
 
                 {/* Assigning Section */}
-                {!subVerticalFilter && (
-                  <div className="border-t border-stone-200 pt-4">
-                    <span className="block text-[10px] font-black uppercase text-[--text-secondary] tracking-wider mb-2">
-                      Assigning
-                    </span>
-                    <div className="grid grid-cols-1 gap-4">
+                <div className="border-t border-stone-200 pt-4">
+                  <span className="block text-[10px] font-black uppercase text-[--text-secondary] tracking-wider mb-2">
+                    Assigning
+                  </span>
+                  <div className="grid grid-cols-2 gap-4">
+                    {!subVerticalFilter && (
                       <div className="flex flex-col gap-1">
                         <span className="text-[10px] font-black uppercase text-stone-500">Sub-Vertical *</span>
                         <select
@@ -1786,9 +1718,18 @@ export const FollowUpsPositivesPage = () => {
                           ))}
                         </select>
                       </div>
+                    )}
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[10px] font-black uppercase text-stone-500">Assign Operator</span>
+                      <SearchableOperatorSelect
+                        agents={agents}
+                        value={leadFormAssignedTo}
+                        onChange={setLeadFormAssignedTo}
+                        placeholder="-- Unassigned --"
+                      />
                     </div>
                   </div>
-                )}
+                </div>
 
                 {/* Dynamic configs (vertical-specific extra fields) */}
                 {customConfigs.length > 0 && (
@@ -1912,6 +1853,22 @@ export const FollowUpsPositivesPage = () => {
                 />
               </div>
 
+              {/* Assign Operator for all imported rows */}
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[10px] font-black uppercase text-[--text-secondary]">
+                  4. Assign Operator (applies to all rows)
+                </span>
+                <SearchableOperatorSelect
+                  agents={agents}
+                  value={assignTarget}
+                  onChange={setAssignTarget}
+                  placeholder="— Select operator —"
+                />
+                <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                  The selected operator will be auto-assigned to every imported row.
+                </small>
+              </div>
+
 
 
               {uploadStatus !== 'idle' && (
@@ -2015,41 +1972,7 @@ export const FollowUpsPositivesPage = () => {
         danger
       />
 
-      {/* Bulk Assign Dialog */}
-      {bulkAssignModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] p-4">
-          <div className="bg-white rounded-xl max-w-sm w-full p-5 space-y-4 shadow-xl">
-            <div className="border-b border-stone-200 pb-2.5">
-              <h4 className="text-sm font-black uppercase text-[--text-primary]">Bulk Assign Employee Name</h4>
-            </div>
-            <div className="space-y-3">
-              <span className="text-[10px] font-black uppercase text-stone-500">Select Employee</span>
-              <EmployeeDropdown 
-                employees={agents.map(a => ({ id: a.id || a._id, name: a.name, role: a.role_name || a.role }))}
-                value={bulkAssignTarget}
-                onChange={setBulkAssignTarget}
-                placeholder="Unassigned"
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-2 border-t border-stone-100">
-              <button
-                type="button"
-                onClick={() => setBulkAssignModal(false)}
-                className="px-3.5 py-1.5 border border-stone-300 text-xs font-bold rounded-lg hover:bg-stone-50 bg-white cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleBulkAssign}
-                className="px-4 py-1.5 bg-[--accent] hover:bg-[--accent-hover] text-white font-black text-xs rounded-lg uppercase tracking-wider cursor-pointer"
-              >
-                Confirm
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
 
       {/* Bulk Status Dialog */}
       {bulkStatusModal && (

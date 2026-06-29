@@ -89,7 +89,6 @@ export const CalendarPage = () => {
       
       const params = { year, month };
       if (selectedSubId) params.subVerticalId = selectedSubId;
-      if (selectedAgentId) params.assignedTo = selectedAgentId;
 
       const res = await axios.get(
         `/api/v1/followUps/verticals/${activeVertical._id}/follow-ups/calendar`,
@@ -111,7 +110,6 @@ export const CalendarPage = () => {
     try {
       const dateStr = formatLocalDate(selectedDate);
       const params = { date: dateStr };
-      if (selectedAgentId) params.assignedTo = selectedAgentId;
 
       const res = await axios.get(
         `/api/v1/followUps/verticals/${activeVertical._id}/follow-ups/by-date`,
@@ -129,12 +127,12 @@ export const CalendarPage = () => {
   // Trigger grid fetch on date, vertical, or filter change
   useEffect(() => {
     fetchCalendarGrid();
-  }, [currentDate, activeVertical, selectedSubId, selectedAgentId]);
+  }, [currentDate, activeVertical, selectedSubId]);
 
   // Trigger daily list fetch on selected date or active vertical change
   useEffect(() => {
     fetchDailyFollowUps();
-  }, [selectedDate, activeVertical, selectedAgentId]);
+  }, [selectedDate, activeVertical]);
 
   // Navigation
   const prevMonth = () => {
@@ -246,20 +244,6 @@ export const CalendarPage = () => {
             ))}
           </select>
 
-          {/* Agent select (scoped to sub-vertical if selected, admins only) */}
-          {isAdmin && (
-            <select
-              value={selectedAgentId}
-              onChange={(e) => setSelectedAgentId(e.target.value)}
-              disabled={!selectedSubId}
-              className="bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-1.5 focus:outline-none focus:border-[--accent] text-xs w-44 disabled:opacity-40"
-            >
-              <option value="">All Agents</option>
-              {agents.map(a => (
-                <option key={a.id} value={a.id}>{a.name} ({a.role})</option>
-              ))}
-            </select>
-          )}
         </div>
       </div>
 

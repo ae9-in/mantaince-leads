@@ -17,7 +17,8 @@ export const AppLayout = () => {
     sidebarCollapsed, toggleSidebar,
     activeVertical, setActiveVertical,
     activeSubVertical, setActiveSubVertical,
-    assignedSubVerticals, setAssignedSubVerticals
+    assignedSubVerticals, setAssignedSubVerticals,
+    leadsRefreshTrigger
   } = useUiStore();
   
   useRealtimeAssignments();
@@ -38,7 +39,7 @@ export const AppLayout = () => {
   snap.current.subVerticalsMap   = subVerticalsMap;
   snap.current.verticals         = verticals;
 
-  // Effect 1: Fetch verticals on mount / role change only
+  // Effect 1: Fetch verticals on mount / role change / realtime refresh trigger
   useEffect(() => {
     let cancelled = false;
     const fetchVerticals = async () => {
@@ -74,16 +75,9 @@ export const AppLayout = () => {
       finally { if (!cancelled) setLoadingVerticals(false); }
     };
 
-    const fetchAssignments = async () => {
-      if (user?.role !== 'agent') return;
-      try { const r = await axios.get('/api/v1/assignments/me'); if (!cancelled) setAssignedSubVerticals(r.data.data); }
-      catch (e) { console.error(e); }
-    };
-
     fetchVerticals();
-    fetchAssignments();
     return () => { cancelled = true; };
-  }, [user?.role]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user?.role, leadsRefreshTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Effect 2: Sync vertical and sub-vertical from URL — reads snap.current to avoid loops
   useEffect(() => {
@@ -103,17 +97,7 @@ export const AppLayout = () => {
       return;
     }
 
-    if (user?.role === 'agent') {
-      const m = assignedSubVerticals.find(s => s._id === subId);
-      if (!m) return;
-      if (!snap.current.activeSubVertical || snap.current.activeSubVertical._id !== m._id) setActiveSubVertical(m);
-      const pvId = m.verticalId;
-      const matchedVert = verticals.find(v => v._id === pvId);
-      if (matchedVert && (!snap.current.activeVertical || snap.current.activeVertical._id !== matchedVert._id)) {
-        setActiveVertical(matchedVert);
-      }
-      return;
-    }
+
 
     const { subVerticalsMap: map, verticals: verts } = snap.current;
     let foundSub = null, foundVert = null;
@@ -226,48 +210,25 @@ export const AppLayout = () => {
             </div>
           )}
 
-          {isAdmin && (
-            <div className="pt-3 mt-2 border-t" style={{ borderColor: 'var(--border)' }}>
-              {!sidebarCollapsed && (
-                <p className="px-3 mb-2 text-[9px] uppercase tracking-widest font-bold" style={{ color: 'var(--text-muted)' }}>
-                  Workspace
-                </p>
-              )}
-              <SidebarVerticalTree
-                verticals={verticals}
-                subVerticals={subVerticalsMap}
-                activeVerticalId={activeVertical?._id}
-                activeSubVerticalId={activeSubVertical?._id}
-                sidebarCollapsed={sidebarCollapsed}
-                onEditVertical={() => navigate('/admin/verticals')}
-                onAddSubVertical={() => navigate('/admin/verticals')}
-                onExpandVertical={fetchSubVerticalsForVertical}
-                onSelectVertical={(vert) => navigate(`/leads?verticalId=${vert._id}`)}
-                loading={loadingVerticals}
-              />
-            </div>
-          )}
-
-          {user?.role === 'agent' && assignedSubVerticals.length > 0 && (
-            <div className="pt-3 mt-2 border-t space-y-0.5" style={{ borderColor: 'var(--border)' }}>
-              {!sidebarCollapsed && (
-                <p className="px-3 mb-2 text-[9px] uppercase tracking-widest font-bold" style={{ color: 'var(--text-muted)' }}>
-                  My Areas
-                </p>
-              )}
-              {assignedSubVerticals.map(sub => (
-                <Link key={sub._id} to={`/leads?subVerticalId=${sub._id}`}
-                  className={`flex items-center gap-2 px-3 py-2 text-xs rounded-lg transition-all font-medium ${
-                    activeSubVertical?._id === sub._id
-                      ? 'bg-[--accent-light] text-[--accent]'
-                      : 'text-[--text-secondary] hover:bg-stone-100'
-                  }`}>
-                  <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: sub.verticalColor || 'var(--accent)' }} />
-                  {!sidebarCollapsed && <span className="truncate">{sub.name} ({sub.verticalName})</span>}
-                </Link>
-              ))}
-            </div>
-          )}
+          <div className="pt-3 mt-2 border-t" style={{ borderColor: 'var(--border)' }}>
+            {!sidebarCollapsed && (
+              <p className="px-3 mb-2 text-[9px] uppercase tracking-widest font-bold" style={{ color: 'var(--text-muted)' }}>
+                Workspace
+              </p>
+            )}
+            <SidebarVerticalTree
+              verticals={verticals}
+              subVerticals={subVerticalsMap}
+              activeVerticalId={activeVertical?._id}
+              activeSubVerticalId={activeSubVertical?._id}
+              sidebarCollapsed={sidebarCollapsed}
+              onEditVertical={isAdmin ? () => navigate('/admin/verticals') : undefined}
+              onAddSubVertical={isAdmin ? () => navigate('/admin/verticals') : undefined}
+              onExpandVertical={fetchSubVerticalsForVertical}
+              onSelectVertical={(vert) => navigate(`/leads?verticalId=${vert._id}`)}
+              loading={loadingVerticals}
+            />
+          </div>
         </nav>
 
         {/* Collapse toggle */}
@@ -307,24 +268,22 @@ export const AppLayout = () => {
                 </Link>
               ))}
 
-              {user?.role === 'agent' && assignedSubVerticals.length > 0 && (
-                <div className="pt-4 mt-3 border-t space-y-0.5" style={{ borderColor: 'var(--border)' }}>
-                  <p className="px-3 mb-2 text-[9px] uppercase tracking-widest font-bold text-[--text-muted]">
-                    My Areas
-                  </p>
-                  {assignedSubVerticals.map(sub => (
-                    <Link key={sub._id} to={`/leads?subVerticalId=${sub._id}`} onClick={() => setMobileOpen(false)}
-                      className={`flex items-center gap-2 px-3 py-2 text-xs rounded-lg transition-all font-medium ${
-                        activeSubVertical?._id === sub._id
-                          ? 'bg-[--accent-light] text-[--accent]'
-                          : 'text-[--text-secondary] hover:bg-stone-100'
+              <div className="pt-4 mt-3 border-t space-y-0.5" style={{ borderColor: 'var(--border)' }}>
+                <p className="px-3 mb-2 text-[9px] uppercase tracking-widest font-bold text-[--text-muted]">
+                  Workspace
+                </p>
+                {verticals.map(vert => (
+                  <div key={vert._id} className="px-3 py-1">
+                    <Link to={`/leads?verticalId=${vert._id}`} onClick={() => setMobileOpen(false)}
+                      className={`flex items-center gap-2 text-xs font-semibold ${
+                        activeVertical?._id === vert._id ? 'text-[--accent]' : 'text-[--text-secondary]'
                       }`}>
-                      <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: sub.verticalColor || 'var(--accent)' }} />
-                      <span className="truncate">{sub.name} ({sub.verticalName})</span>
+                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: vert.color || 'var(--accent)' }} />
+                      <span>{vert.name}</span>
                     </Link>
-                  ))}
-                </div>
-              )}
+                  </div>
+                ))}
+              </div>
 
               {isAdmin && (
                 <div className="pt-4 mt-3 border-t space-y-0.5" style={{ borderColor: 'var(--border)' }}>

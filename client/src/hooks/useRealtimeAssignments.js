@@ -23,7 +23,8 @@ export function useRealtimeAssignments() {
         payload.type === 'FOLLOWUP_CREATED' ||
         payload.type === 'FOLLOWUP_UPDATED' ||
         payload.type === 'USER_MUTATED' ||
-        payload.type === 'ASSIGNMENT_UPDATED'
+        payload.type === 'ASSIGNMENT_UPDATED' ||
+        payload.type === 'VERTICAL_MUTATED'
       ) {
         triggerLeadsRefresh();
       }

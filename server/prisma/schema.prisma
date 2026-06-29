@@ -32,6 +32,7 @@ model User {
   roleId               String
   role                 Role              @relation(fields: [roleId], references: [id])
   isActive             Boolean           @default(true)
+  isApproved           Boolean           @default(false)
   lastLoginAt          DateTime?
   createdBy            String?
   creator              User?             @relation("UserToUser", fields: [createdBy], references: [id])

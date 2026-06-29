@@ -116,6 +116,13 @@ export const LoginPage = () => {
                 : <><LogIn size={15} /><span>Sign In</span></>}
             </button>
           </form>
+
+          <div className="mt-6 text-center text-xs font-medium" style={{ color: '#7a6a5a' }}>
+            Don't have an account?{' '}
+            <Link to="/register" className="font-semibold transition-all" style={{ color: 'var(--accent)' }}>
+              Register here
+            </Link>
+          </div>
         </div>
 
         <p className="text-center text-xs mt-6" style={{ color: '#b5a898' }}>

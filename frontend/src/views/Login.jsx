@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { LogIn, AlertCircle } from 'lucide-react';
 
@@ -83,6 +84,13 @@ const Login = () => {
             )}
           </button>
         </form>
+
+        <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '14px', color: 'var(--text-muted, #94A3B8)' }}>
+          Don't have an account?{' '}
+          <Link to="/register" style={{ color: 'var(--accent, #6366F1)', textDecoration: 'none', fontWeight: '600' }}>
+            Register here
+          </Link>
+        </div>
       </div>
     </div>
   );

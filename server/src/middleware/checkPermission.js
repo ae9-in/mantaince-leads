@@ -33,29 +33,9 @@ export const checkPermission = (permissionKeyOrKeys) => {
       });
     }
 
-    // Inject Query Scoping variables into the request object
-    if (roleName === 'super_admin') {
-      req.verticalScope = {};
-      req.assignedScope = { isDeleted: false };
-    } else if (roleName === 'vertical_admin') {
-      // vertical_admin scope is limited to their verticalAccess array
-      req.verticalScope = {
-        verticalId: { $in: req.user.verticalAccess || [] }
-      };
-      req.assignedScope = {
-        verticalId: { $in: req.user.verticalAccess || [] },
-        isDeleted: false
-      };
-    } else if (roleName === 'agent') {
-      // agents are restricted to leads in sub-verticals assigned to them
-      req.verticalScope = {
-        verticalId: { $in: req.user.verticalAccess || [] }
-      };
-      req.assignedScope = {
-        subVerticalId: { $in: req.user.assignedSubVerticals || [] },
-        isDeleted: false
-      };
-    }
+    // Inject Query Scoping variables into the request object (Unrestricted globally)
+    req.verticalScope = {};
+    req.assignedScope = { isDeleted: false };
 
     next();
   };

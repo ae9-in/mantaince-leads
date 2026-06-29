@@ -30,8 +30,7 @@ const UsersView = () => {
     name: '',
     email: '',
     password: '',
-    role: 'agent',
-    verticalAccess: [] // array of vertical IDs
+    role: 'agent'
   });
   const [formErrors, setFormErrors] = useState([]);
   const [submitting, setSubmitting] = useState(false);
@@ -49,6 +48,17 @@ const UsersView = () => {
     }
   };
 
+  const handleApproveUser = async (userId) => {
+    try {
+      await api(`/users/${userId}/approve`, {
+        method: 'PATCH'
+      });
+      fetchUsers();
+    } catch (err) {
+      alert(`Approval failed: ${err.message}`);
+    }
+  };
+
   useEffect(() => {
     fetchUsers();
   }, []);
@@ -61,8 +71,7 @@ const UsersView = () => {
       name: '',
       email: '',
       password: '',
-      role: 'agent',
-      verticalAccess: []
+      role: 'agent'
     });
     setUserModalOpen(true);
   };
@@ -75,24 +84,9 @@ const UsersView = () => {
       name: userItem.name,
       email: userItem.email,
       password: '', // Don't prefill password
-      role: userItem.roleId?.name || '',
-      verticalAccess: userItem.verticalAccess?.map(v => v._id || v) || []
+      role: userItem.roleId?.name || ''
     });
     setUserModalOpen(true);
-  };
-
-  // Toggle vertical checkbox
-  const handleVerticalCheckboxChange = (vId) => {
-    setUserForm(prev => {
-      const isChecked = prev.verticalAccess.includes(vId);
-      const newAccess = isChecked
-        ? prev.verticalAccess.filter(id => id !== vId)
-        : [...prev.verticalAccess, vId];
-      return {
-        ...prev,
-        verticalAccess: newAccess
-      };
-    });
   };
 
   // Submit User form
@@ -106,18 +100,22 @@ const UsersView = () => {
         // Edit User
         const payload = {
           name: userForm.name,
-          role: userForm.role,
-          verticalAccess: userForm.verticalAccess
+          role: userForm.role
         };
         await api(`/users/${selectedUser._id}`, {
-          method: 'PUT',
+          method: 'PATCH',
           body: JSON.stringify(payload)
         });
       } else {
         // Create User
         await api('/users', {
           method: 'POST',
-          body: JSON.stringify(userForm)
+          body: JSON.stringify({
+            name: userForm.name,
+            email: userForm.email,
+            password: userForm.password,
+            role: userForm.role
+          })
         });
       }
 
@@ -144,11 +142,7 @@ const UsersView = () => {
     }
   };
 
-  // Filter vertical list based on user authorization
-  // Super Admin can assign any vertical. Vertical Admin can only assign verticals they possess.
-  const assignableVerticals = isSuperAdmin 
-    ? verticals 
-    : verticals.filter(v => currentUser?.verticalAccess.includes(v._id));
+
 
   return (
     <>
@@ -185,7 +179,7 @@ const UsersView = () => {
                   <th>Name</th>
                   <th>Email</th>
                   <th>Role</th>
-                  <th>Vertical Access</th>
+                  <th>Approval Status</th>
                   <th>Account Status</th>
                   <th>Actions</th>
                 </tr>
@@ -212,18 +206,19 @@ const UsersView = () => {
                         </span>
                       </td>
                       <td>
-                        {roleName === 'super_admin' ? (
-                          <span style={{ fontStyle: 'italic', color: 'var(--accent-primary-hover)', fontSize: '0.85rem', fontWeight: 600 }}>Unrestricted (Global)</span>
-                        ) : item.verticalAccess && item.verticalAccess.length > 0 ? (
-                          <div className="badge-list">
-                            {item.verticalAccess.map(v => (
-                              <span key={v._id || v} className="tag-badge">
-                                {v.name || verticals.find(x => x._id === v)?.name || 'Vertical'}
-                              </span>
-                            ))}
-                          </div>
+                        {item.isApproved ? (
+                          <span className="tag-badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10B981', fontWeight: 'bold' }}>Approved</span>
                         ) : (
-                          <span style={{ color: 'var(--text-dim)', fontStyle: 'italic', fontSize: '0.85rem' }}>No access granted</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span className="tag-badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#F59E0B', fontWeight: 'bold' }}>Pending</span>
+                            <button
+                              onClick={() => handleApproveUser(item._id)}
+                              className="glow-button"
+                              style={{ padding: '4px 8px', fontSize: '0.75rem', borderRadius: '4px' }}
+                            >
+                              Approve
+                            </button>
+                          </div>
                         )}
                       </td>
                       <td>
@@ -339,9 +334,7 @@ const UsersView = () => {
                     const r = e.target.value;
                     setUserForm(prev => ({
                       ...prev,
-                      role: r,
-                      // Clear vertical access if role is super admin (not scoped)
-                      verticalAccess: r === 'super_admin' ? [] : prev.verticalAccess
+                      role: r
                     }));
                   }}
                   disabled={submitting}
@@ -352,45 +345,7 @@ const UsersView = () => {
                 </select>
               </div>
 
-              {/* Vertical access assignment checks */}
-              {userForm.role !== 'super_admin' && (
-                <div className="form-group">
-                  <label>Assign Workspace Access (select at least one vertical)</label>
-                  <div 
-                    className="glass-panel" 
-                    style={{ 
-                      padding: '16px', 
-                      background: 'rgba(0,0,0,0.15)', 
-                      display: 'flex', 
-                      flexDirection: 'column', 
-                      gap: '12px',
-                      maxHeight: '180px',
-                      overflowY: 'auto'
-                    }}
-                  >
-                    {assignableVerticals.length === 0 ? (
-                      <span style={{ fontSize: '0.85rem', color: 'var(--text-dim)', fontStyle: 'italic' }}>
-                        No business verticals available to assign.
-                      </span>
-                    ) : (
-                      assignableVerticals.map(v => {
-                        const isChecked = userForm.verticalAccess.includes(v._id);
-                        return (
-                          <label key={v._id} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => handleVerticalCheckboxChange(v._id)}
-                              disabled={submitting}
-                            />
-                            <span style={{ fontSize: '0.9rem' }}>{v.name}</span>
-                          </label>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              )}
+
 
               <div className="modal-footer">
                 <button type="button" className="action-btn" style={{ padding: '10px 20px', borderRadius: '8px', border: '1px solid var(--border-light)' }} onClick={() => setUserModalOpen(false)}>

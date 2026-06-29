@@ -95,7 +95,6 @@ export const FollowUpsPage = () => {
     setLoading(true);
     try {
       const params = { date: dateStr };
-      if (agentId) params.assignedTo = agentId;
       if (selectedSubVerticalId) params.subVerticalId = selectedSubVerticalId;
       
       const res = await axios.get(
@@ -113,7 +112,7 @@ export const FollowUpsPage = () => {
 
   useEffect(() => {
     fetchFollowUps();
-  }, [activeVertical, selectedSubVerticalId, dateStr, agentId, leadsRefreshTrigger]);
+  }, [activeVertical, selectedSubVerticalId, dateStr, leadsRefreshTrigger]);
 
   // Fetch vertical stats dashboard
   const fetchStats = async () => {
@@ -292,15 +291,6 @@ export const FollowUpsPage = () => {
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Employee Name</label>
-                  <EmployeeDropdown 
-                    employees={agents.map(a => ({ id: a.id || a._id, name: a.name, role: a.role_name || a.role }))}
-                    value={agentId}
-                    onChange={(id) => updateFilter('assignedTo', id)}
-                    placeholder="All Employees"
-                  />
-                </div>
 
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] font-black text-[--text-secondary] uppercase tracking-wider">Visit Status</label>
@@ -348,41 +338,6 @@ export const FollowUpsPage = () => {
               )}
             </div>
 
-            {/* Real-time Employee Details Card */}
-            {selectedAgent && (
-              <div className="glass-panel p-5 bg-[--accent-light]/20 border border-[--accent-border]/30 shadow-sm space-y-4 animate-in fade-in duration-500">
-                <h3 className="text-[10px] font-black text-[--accent] uppercase tracking-widest flex items-center gap-2">
-                  <User size={14} />
-                  <span>Employee Details</span>
-                </h3>
-                
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-[--accent] text-white flex items-center justify-center font-black text-lg shadow-inner">
-                    {selectedAgent.name?.slice(0, 2).toUpperCase()}
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-[--text-primary] leading-none">{selectedAgent.name}</h4>
-                    <p className="text-[10px] text-[--text-muted] mt-1 font-medium">{selectedAgent.email}</p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 pt-2">
-                  <div className="bg-white/60 p-2 rounded-lg border border-[--accent-border]/20 text-center">
-                    <span className="block text-[8px] uppercase font-black text-[--text-muted]">Role</span>
-                    <span className="text-[10px] font-bold text-[--accent] uppercase">
-                      {(selectedAgent.role_name || selectedAgent.role || 'Agent').replace('_', ' ')}
-                    </span>
-                  </div>
-                  <div className="bg-white/60 p-2 rounded-lg border border-[--accent-border]/20 text-center">
-                    <span className="block text-[8px] uppercase font-black text-[--text-muted]">Status</span>
-                    <span className="text-[10px] font-bold text-emerald-600 uppercase flex items-center justify-center gap-1">
-                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                      Active
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Right Column: Follow-up List & Details */}
@@ -652,16 +607,6 @@ const FollowUpCard = ({ item, onComplete, isAdmin }) => {
 
         {/* Right: metadata */}
         <div className="lg:w-1/6 space-y-4 text-[10px] border-l border-stone-50 pl-6 hidden lg:block">
-          <div>
-            <span className="block font-black text-[--text-muted] uppercase tracking-widest mb-1">Employee Name</span>
-            <div className="flex items-center gap-1.5 font-bold text-[--text-primary]">
-              <div className="w-5 h-5 rounded-md bg-stone-100 flex items-center justify-center text-[8px] border border-stone-200">
-                {item.assigned_to_name?.slice(0,1)}
-              </div>
-              <span className="truncate">{item.assigned_to_name}</span>
-            </div>
-          </div>
-
           <div>
             <span className="block font-black text-[--text-muted] uppercase tracking-widest mb-1">Created By</span>
             <span className="font-medium text-[--text-secondary]">{item.creator_name}</span>

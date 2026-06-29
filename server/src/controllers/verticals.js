@@ -7,6 +7,7 @@ import {
     invalidateOnTaxonomyChange
 } from '../services/cache.js';
 import { CacheKeys, TTL } from '../lib/cacheKeys.js';
+import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 
 /**
  * Generate standard slug from name
@@ -28,12 +29,6 @@ export const getVerticals = async (req, res) => {
             const vertRes = await query('SELECT * FROM verticals ORDER BY display_order ASC');
             return vertRes.rows;
         });
-
-        if (req.user.role !== 'super_admin') {
-            const allowedIds = req.user.verticalAccess || [];
-            const filtered   = verticals.filter(v => v.is_active && allowedIds.includes(v.id));
-            return res.status(200).json({ success: true, data: filtered });
-        }
 
         return res.status(200).json({ success: true, data: verticals });
     } catch (error) {
@@ -83,6 +78,7 @@ export const createVertical = async (req, res) => {
 
         // Invalidate taxonomy caches
         await invalidateOnTaxonomyChange(null);
+        await broadcastToAll({ type: 'VERTICAL_MUTATED' });
 
         logAudit(req, { action: 'vertical.create', targetCollection: 'verticals', targetId: vertical.id, after: vertical });
 
@@ -102,11 +98,6 @@ export const getVerticalById = async (req, res) => {
         return res.status(404).json({ success: false, error: 'Vertical not found' });
     }
     try {
-        // RBAC access check
-        if (req.user.role !== 'super_admin' && !req.user.verticalAccess.includes(id)) {
-            return res.status(403).json({ success: false, error: 'Forbidden access to this business vertical' });
-        }
-
         const cacheKey = CacheKeys.verticalFull(id);
         const result   = await withCache(cacheKey, TTL.VERTICALS, async () => {
             // Parallel fetch of vertical + its sub-verticals — one round-trip each
@@ -168,6 +159,7 @@ export const updateVertical = async (req, res) => {
         const updatedVertical = updatedRes.rows[0];
 
         await invalidateOnTaxonomyChange(id);
+        await broadcastToAll({ type: 'VERTICAL_MUTATED' });
 
         logAudit(req, { action: 'vertical.update', targetCollection: 'verticals', targetId: id, before, after: updatedVertical });
 
@@ -198,6 +190,7 @@ export const deleteVertical = async (req, res) => {
         }
 
         await invalidateOnTaxonomyChange(id);
+        await broadcastToAll({ type: 'VERTICAL_MUTATED' });
 
         logAudit(req, { action: 'vertical.delete', targetCollection: 'verticals', targetId: id, before: vertical });
 
@@ -237,6 +230,7 @@ export const reorderVerticals = async (req, res) => {
         `, params);
 
         await invalidateOnTaxonomyChange(null);
+        await broadcastToAll({ type: 'VERTICAL_MUTATED' });
 
         await logAudit(req, {
             action: 'vertical.reorder',
@@ -262,10 +256,6 @@ export const getSubVerticals = async (req, res) => {
         return res.status(200).json({ success: true, data: [] });
     }
     try {
-        if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
-        }
-
         const subVerticals = await withCache(CacheKeys.subVerticals(verticalId), TTL.SUB_VERTICALS, async () => {
             const res2 = await query(
                 'SELECT * FROM sub_verticals WHERE vertical_id = $1 ORDER BY display_order ASC',
@@ -290,10 +280,6 @@ export const createSubVertical = async (req, res) => {
         return res.status(400).json({ success: false, error: 'Invalid vertical ID format' });
     }
     try {
-        if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
-        }
-
         const slug = generateSlug(name);
 
         const [existsRes, maxOrderRes] = await Promise.all([
@@ -315,6 +301,7 @@ export const createSubVertical = async (req, res) => {
         `, [subId, name, slug, verticalId, displayOrder, req.user.sub]);
 
         await invalidateOnTaxonomyChange(verticalId);
+        await broadcastToAll({ type: 'VERTICAL_MUTATED' });
 
         logAudit(req, { action: 'sub_vertical.create', targetCollection: 'sub_verticals', targetId: subId, after: subRes.rows[0] });
 
@@ -337,10 +324,6 @@ export const updateSubVertical = async (req, res) => {
             return res.status(404).json({ success: false, error: 'Sub-vertical not found' });
         }
 
-        if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(subVertical.vertical_id))) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
-        }
-
         const setClauses = [];
         const params     = [subId];
         let   pIdx       = 2;
@@ -356,6 +339,7 @@ export const updateSubVertical = async (req, res) => {
         }
 
         await invalidateOnTaxonomyChange(subVertical.vertical_id);
+        await broadcastToAll({ type: 'VERTICAL_MUTATED' });
 
         logAudit(req, { action: 'sub_vertical.update', targetCollection: 'sub_verticals', targetId: subId, after: updatedRes.rows[0] });
 
@@ -377,10 +361,6 @@ export const deleteSubVertical = async (req, res) => {
             return res.status(404).json({ success: false, error: 'Sub-vertical not found' });
         }
 
-        if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(subVertical.vertical_id))) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
-        }
-
         const leadsRes = await query(
             'SELECT COUNT(*) FROM cost_conversions WHERE sub_vertical_id = $1 AND is_deleted = false', [subId]
         );
@@ -394,6 +374,7 @@ export const deleteSubVertical = async (req, res) => {
         }
 
         await invalidateOnTaxonomyChange(subVertical.vertical_id);
+        await broadcastToAll({ type: 'VERTICAL_MUTATED' });
 
         logAudit(req, { action: 'sub_vertical.delete', targetCollection: 'sub_verticals', targetId: subId, before: subRes.rows[0] });
 
@@ -414,10 +395,6 @@ export const reorderSubVerticals = async (req, res) => {
         return res.status(400).json({ success: false, error: 'Invalid vertical ID format' });
     }
     try {
-        if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
-        }
-
         if (!Array.isArray(items) || items.length === 0) {
             return res.status(200).json({ success: true, data: { message: 'Order updated' } });
         }
@@ -436,6 +413,7 @@ export const reorderSubVerticals = async (req, res) => {
         `, params);
 
         await invalidateOnTaxonomyChange(verticalId);
+        await broadcastToAll({ type: 'VERTICAL_MUTATED' });
 
         await logAudit(req, {
             action: 'sub_vertical.reorder',
@@ -467,11 +445,6 @@ export const getSubVerticalById = async (req, res) => {
 
         if (!sub) {
             return res.status(404).json({ success: false, error: 'Sub-vertical not found' });
-        }
-        
-        // RBAC: if user is not super admin, check if they have access to parent vertical
-        if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(sub.vertical_id))) {
-            return res.status(403).json({ success: false, error: 'Access forbidden' });
         }
 
         return res.status(200).json({ success: true, data: sub });

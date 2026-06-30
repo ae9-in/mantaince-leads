@@ -54,12 +54,15 @@ const pool = new Pool({
         rejectUnauthorized: false,
         ca: fs.existsSync(caBundlePath) ? fs.readFileSync(caBundlePath).toString() : undefined
     },
-    // Performance-tuned pool settings
-    max:                    25,      // Raised from 20 — handles higher concurrency bursts
-    idleTimeoutMillis:      30_000,
+    // Performance-tuned pool settings (150 concurrent users @ 3 parallel queries each)
+    max:                     50,     // Up from 25 — Aurora handles 80+ connections on db.r6g.large
+    min:                      5,     // Keep warm connections ready at all times
+    idleTimeoutMillis:      20_000,  // Reclaim idle connections faster (20 s)
     connectionTimeoutMillis: 5_000,
     allowExitOnIdle:        false,
-    statement_timeout:      10000,   // Natively enforce 10s hard limit on statement execution
+    keepAlive:              true,    // Prevent TCP RST from Aurora idle timeout (8h default)
+    keepAliveInitialDelayMillis: 10_000,
+    statement_timeout:      15000,   // 15s hard limit — more headroom for CSV exports
 });
 
 // Surface idle-client errors before they cause silent failures
@@ -580,6 +583,17 @@ const runMigrations = async () => {
         -- Statistics: help query planner on low-cardinality status/source columns
         ALTER TABLE cost_conversions ALTER COLUMN status SET STATISTICS 500;
         ALTER TABLE cost_conversions ALTER COLUMN source SET STATISTICS 200;
+
+        -- ── NEW: Compound index for lead_type filter (replaces seq-scan on 10k+ rows)
+        -- Covers: WHERE vertical_id = $1 AND is_deleted = false AND lead_type != 'POSITIVE'
+        CREATE INDEX IF NOT EXISTS idx_cost_conversions_vertical_leadtype_created
+            ON cost_conversions (vertical_id, lead_type, created_at DESC, id DESC)
+            WHERE is_deleted = false;
+
+        -- ── NEW: Worker queue poll index (FOR UPDATE SKIP LOCKED on status='queued')
+        CREATE INDEX IF NOT EXISTS idx_csv_upload_logs_status_created
+            ON csv_upload_logs (status, created_at ASC)
+            WHERE status = 'queued';
 
         -- Autovacuum tuning for write-heavy import workloads
         ALTER TABLE cost_conversions SET (

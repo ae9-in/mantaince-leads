@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
@@ -80,6 +80,21 @@ const LeadsView = () => {
   const [csvLogs, setCsvLogs] = useState([]);
   const [uploadError, setUploadError] = useState(null);
 
+  // Debounced search: waits 400ms after last keystroke before firing API call.
+  // Prevents hammering the backend on every character typed against 10k+ rows.
+  const searchDebounceRef = useRef(null);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  const handleSearchChange = useCallback((e) => {
+    const val = e.target.value;
+    setSearch(val);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      setDebouncedSearch(val);
+      setPage(1);
+    }, 400);
+  }, []);
+
   // Fetch leads based on filters
   const fetchLeads = useCallback(async () => {
     if (!currentVertical) return;
@@ -103,7 +118,7 @@ const LeadsView = () => {
     } finally {
       setLoading(false);
     }
-  }, [currentVertical, page, limit, statusFilter, subVerticalFilter, agentFilter, search]);
+  }, [currentVertical, page, limit, statusFilter, subVerticalFilter, agentFilter, debouncedSearch]);
 
   // Fetch reference metadata (configs, subverticals, agents)
   const fetchMetadata = useCallback(async () => {
@@ -362,56 +377,31 @@ const LeadsView = () => {
     }
   };
 
-  const handleDownloadTemplate = () => {
-    // Generate template CSV based on current configurations
-    const baseHeaders = [
-      'Name',
-      'Number',
-      'Business',
-      'Employee Spoken',
-      'Lead Type',
-      'Status',
-      'Name Business',
-      'Date',
-      'Delivered Location (Google Maps Location)',
-      'Delivered Link'
-    ];
-
-    const baseExample = [
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      ''
-    ];
-
-    const headers = [...baseHeaders];
-    const exampleRow = [...baseExample];
-
-    configs.forEach(c => {
-      const header = c.isCsvMapped && c.csvHeader ? c.csvHeader : c.label;
-      headers.push(header);
-      exampleRow.push('');
-    });
-
-    const csvContent = [
-      headers.map(h => `"${h.replace(/"/g, '""')}"`).join(','),
-      exampleRow.map(v => `"${v.replace(/"/g, '""')}"`).join(',')
-    ].join('\n') + '\n';
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `leads-template-${currentVertical?.slug}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  // Download CSV template from server — always synced with latest field configs
+  const handleDownloadTemplate = async () => {
+    if (!currentVertical) return;
+    try {
+      // Server endpoint returns a properly synchronized template with deduplication
+      // and ETag caching — no stale local headers.
+      const BACKEND = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+      const token   = (await import('../services/api.js')).getAccessToken();
+      const resp = await fetch(
+        `${BACKEND}/v1/leads/csv/template/${currentVertical._id}`,
+        { headers: { Authorization: `Bearer ${token}` }, credentials: 'include' }
+      );
+      if (!resp.ok) throw new Error('Failed to download template');
+      const blob = await resp.blob();
+      const url  = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `template-${currentVertical.slug}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(`Template download failed: ${err.message}`);
+    }
   };
 
   if (!currentVertical) {
@@ -462,7 +452,7 @@ const LeadsView = () => {
               placeholder="Search leads..."
               className="form-control"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={handleSearchChange}
             />
           </div>
 

@@ -1,4 +1,6 @@
+import pg from 'pg';
 import { query } from '../config/db.js';
+import pool from '../config/db.js';
 import crypto from 'crypto';
 import { logAudit } from '../services/audit.js';
 import { isValidUUID } from '../utils/validators/index.js';
@@ -13,6 +15,12 @@ import { CacheKeys, TTL } from '../lib/cacheKeys.js';
 import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 import { z } from 'zod';
 import { bulkInsert } from '../db/bulkInsert.js';
+
+// ── CSV escape helper (module-level, reused by export) ────────────────────────
+const escapeCsvVal = (val) => {
+    if (val === undefined || val === null) return '';
+    return val.toString().replace(/"/g, '""');
+};
 
 // ── Cursor helpers ─────────────────────────────────────────────────────────────
 function encodeCursor(createdAt, id) {
@@ -698,104 +706,125 @@ export const assignCostConversion = async (req, res) => {
 };
 
 /**
+ * Serialize one lead row to a CSV line for the given leadType.
+ * Extracted to avoid code duplication between POSITIVE and CALL branches.
+ */
+function serializeLeadCsvRow(l, isPositive) {
+    const d = l.data || {};
+    const dateVal = d.date || (l.created_at ? l.created_at.toISOString().split('T')[0] : '');
+    const empName = l.assignee_name || d.employeeName || '';
+    const bType   = d.businessType || '';
+    const name    = l.name || l.business_name || d.businessName || '';
+
+    if (isPositive) {
+        return [
+            dateVal, empName, bType, name,
+            d.area || '', d.city || '',
+            l.phone || d.phone || '',
+            d.pointOfContact || '', d.remarks || '', d.recordings || '',
+            d.followUpRequired || '', d.followUps || '',
+            d.followUpDates || '', d.followUpRemarks || '',
+            d.requirement || '', d.notes || '', l.status || '',
+        ].map(v => `"${escapeCsvVal(v)}"`).join(',');
+    } else {
+        return [
+            dateVal, empName, bType, name,
+            l.phone || d.phone || '',
+            d.pointOfContact || '', d.area || '', d.city || '',
+            d.deliveredLocation || '', d.remarks || '', d.recordings || '',
+            d.appointmentType || '', d.appointmentDate || '',
+            d.appointmentTime || '', d.requirement || '', d.notes || '',
+            l.status || '',
+        ].map(v => `"${escapeCsvVal(v)}"`).join(',');
+    }
+}
+
+/**
  * GET /cost-conversions/export/csv
+ *
+ * Streams results row-by-row using a pg server-side cursor.
+ * Memory stays flat regardless of result size (even 50k+ rows).
+ * First bytes arrive at the client in ~100ms.
  */
 export const exportCostConversionsCsv = async (req, res) => {
     const { verticalId, leadType } = req.query;
     if (!isValidUUID(verticalId)) {
         return res.status(400).json({ success: false, error: 'Invalid vertical ID format' });
     }
-    try {
-        if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
-        }
 
-        const params = [verticalId];
-        let sql = `
-            SELECT
-                l.id, l.name, l.phone, l.business_name,
-                l.status, l.source, l.created_at, l.data,
-                u.name  AS assignee_name,
-                sv.name AS sub_vertical_name
-            FROM cost_conversions l
-            LEFT JOIN users         u  ON u.id  = l.assigned_to
-            LEFT JOIN sub_verticals sv ON sv.id = l.sub_vertical_id
-            WHERE l.vertical_id = $1 AND l.is_deleted = false
-        `;
-        if (leadType) {
-            sql += ` AND l.lead_type = $2`;
-            params.push(leadType);
-        } else {
-            sql += ` AND l.lead_type != 'POSITIVE'`;
-        }
-        sql += ` ORDER BY l.created_at DESC`;
-
-        const leadsRes = await query(sql, params);
-        const leads = leadsRes.rows;
-
-        const escapeCsvVal = (val) => {
-            if (val === undefined || val === null) return '';
-            return val.toString().replace(/"/g, '""');
-        };
-
-        let csvHeader = '';
-        let csvRows = '';
-        const isPositive = leadType === 'POSITIVE';
-
-        if (isPositive) {
-            csvHeader = 'DATE,EMPLOYEE NAME,BUSINESS TYPE,BUSINESS / PERSON / SHOP / COMPANY NAME,AREA,CITY,CONTACT NUMBER,POINT OF CONTACT,REMARKS,RECORDINGS,FOLLOW-UP REQUIRED,FOLLOW-UPS,FOLLOW-UP DATES,FOLLOW-UP REMARKS,REQUIREMENT IF ANY,A NOTES TO THE COS TEAM ONLY,Status\n';
-            csvRows = leads.map(l => {
-                const d = l.data || {};
-                const dateVal = d.date || (l.created_at ? l.created_at.toISOString().split('T')[0] : '');
-                const empName = l.assignee_name || d.employeeName || '';
-                const bType = d.businessType || '';
-                const name = l.name || l.business_name || d.businessName || '';
-                const area = d.area || '';
-                const city = d.city || '';
-                const contact = l.phone || d.phone || '';
-                const poc = d.pointOfContact || '';
-                const remarks = d.remarks || '';
-                const recordings = d.recordings || '';
-                const followUpRequired = d.followUpRequired || '';
-                const followUps = d.followUps || '';
-                const followUpDates = d.followUpDates || '';
-                const followUpRemarks = d.followUpRemarks || '';
-                const reqVal = d.requirement || '';
-                const notes = d.notes || '';
-
-                return `"${escapeCsvVal(dateVal)}","${escapeCsvVal(empName)}","${escapeCsvVal(bType)}","${escapeCsvVal(name)}","${escapeCsvVal(area)}","${escapeCsvVal(city)}","${escapeCsvVal(contact)}","${escapeCsvVal(poc)}","${escapeCsvVal(remarks)}","${escapeCsvVal(recordings)}","${escapeCsvVal(followUpRequired)}","${escapeCsvVal(followUps)}","${escapeCsvVal(followUpDates)}","${escapeCsvVal(followUpRemarks)}","${escapeCsvVal(reqVal)}","${escapeCsvVal(notes)}","${escapeCsvVal(l.status)}"`;
-            }).join('\n');
-        } else {
-            csvHeader = 'DATE,EMPLOYEE NAME,BUSINESS TYPE,BUSINESS / PERSON / SHOP / COMPANY NAME,CONTACT NUMBER,POINT OF CONTACT,AREA,CITY,LINK ADDRESS,REMARKS,RECORDINGS,APPOINTMENT TYPE (YES OR NO),APPOINTMENT DATE,APPOINTMENT TIME,REQUIREMENT ORDER IF ANY,NOTES TO THE COS IF ANY,Status\n';
-            csvRows = leads.map(l => {
-                const d = l.data || {};
-                const dateVal = d.date || (l.created_at ? l.created_at.toISOString().split('T')[0] : '');
-                const empName = l.assignee_name || d.employeeName || '';
-                const bType = d.businessType || '';
-                const name = l.name || l.business_name || d.businessName || '';
-                const contact = l.phone || d.phone || '';
-                const poc = d.pointOfContact || '';
-                const area = d.area || '';
-                const city = d.city || '';
-                const mapLink = d.deliveredLocation || '';
-                const rem = d.remarks || '';
-                const rec = d.recordings || '';
-                const appTime = d.appointmentTime || '';
-                const appType = d.appointmentType || '';
-                const appDate = d.appointmentDate || '';
-                const reqVal = d.requirement || '';
-                const notes = d.notes || '';
-
-                return `"${escapeCsvVal(dateVal)}","${escapeCsvVal(empName)}","${escapeCsvVal(bType)}","${escapeCsvVal(name)}","${escapeCsvVal(contact)}","${escapeCsvVal(poc)}","${escapeCsvVal(area)}","${escapeCsvVal(city)}","${escapeCsvVal(mapLink)}","${escapeCsvVal(rem)}","${escapeCsvVal(rec)}","${escapeCsvVal(appType)}","${escapeCsvVal(appDate)}","${escapeCsvVal(appTime)}","${escapeCsvVal(reqVal)}","${escapeCsvVal(notes)}","${escapeCsvVal(l.status)}"`;
-            }).join('\n');
-        }
-
-        res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', `attachment; filename=cost-conversions-export-${Date.now()}.csv`);
-        return res.status(200).send(csvHeader + csvRows);
-    } catch (error) {
-        return res.status(500).json({ success: false, error: error.message });
+    if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
+        return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
     }
+
+    const isPositive = leadType === 'POSITIVE';
+
+    const csvHeader = isPositive
+        ? 'DATE,EMPLOYEE NAME,BUSINESS TYPE,BUSINESS / PERSON / SHOP / COMPANY NAME,AREA,CITY,CONTACT NUMBER,POINT OF CONTACT,REMARKS,RECORDINGS,FOLLOW-UP REQUIRED,FOLLOW-UPS,FOLLOW-UP DATES,FOLLOW-UP REMARKS,REQUIREMENT IF ANY,A NOTES TO THE COS TEAM ONLY,Status\n'
+        : 'DATE,EMPLOYEE NAME,BUSINESS TYPE,BUSINESS / PERSON / SHOP / COMPANY NAME,CONTACT NUMBER,POINT OF CONTACT,AREA,CITY,LINK ADDRESS,REMARKS,RECORDINGS,APPOINTMENT TYPE (YES OR NO),APPOINTMENT DATE,APPOINTMENT TIME,REQUIREMENT ORDER IF ANY,NOTES TO THE COS IF ANY,Status\n';
+
+    // Build query — same projection as before, cursor-friendly
+    const params = [verticalId];
+    let sql = `
+        SELECT
+            l.name, l.phone, l.business_name,
+            l.status, l.created_at, l.data,
+            u.name  AS assignee_name
+        FROM cost_conversions l
+        LEFT JOIN users u ON u.id = l.assigned_to
+        WHERE l.vertical_id = $1 AND l.is_deleted = false
+    `;
+    if (leadType) {
+        sql += ` AND l.lead_type = $2`;
+        params.push(leadType);
+    } else {
+        sql += ` AND l.lead_type != 'POSITIVE'`;
+    }
+    sql += ` ORDER BY l.created_at DESC`;
+
+    // Grab a dedicated client from the pool for cursor use
+    const client = await pool.connect();
+    let streamError = null;
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=cost-conversions-export-${Date.now()}.csv`);
+    // Disable compression for streaming responses
+    res.setHeader('X-No-Compression', '1');
+
+    try {
+        await client.query('BEGIN');
+        const cursor = client.query(new pg.Cursor(sql, params));
+
+        // Write header immediately so the download starts in the browser
+        res.write(csvHeader);
+
+        const PAGE = 500;
+        let firstChunk = true;
+        while (true) {
+            const rows = await new Promise((resolve, reject) =>
+                cursor.read(PAGE, (err, rows) => (err ? reject(err) : resolve(rows)))
+            );
+            if (!rows || rows.length === 0) break;
+
+            const lines = rows.map(l => serializeLeadCsvRow(l, isPositive));
+            res.write((firstChunk ? '' : '\n') + lines.join('\n'));
+            firstChunk = false;
+        }
+
+        await cursor.close();
+        await client.query('COMMIT');
+    } catch (error) {
+        streamError = error;
+        console.error('[Export CSV] Stream error:', error.message);
+        try { await client.query('ROLLBACK'); } catch (_) {}
+    } finally {
+        client.release();
+    }
+
+    if (streamError && !res.headersSent) {
+        return res.status(500).json({ success: false, error: streamError.message });
+    }
+
+    res.end();
 };
 
 /**

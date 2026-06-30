@@ -145,7 +145,12 @@ app.use((req, res, next) => {
   res.json = function (body) {
     if (body !== null && body !== undefined && typeof body === 'object') {
       if (body.success && body.data !== undefined) {
-        body.data = mapIdToUnderscoreId(body.data);
+        // Fast-path: skip expensive recursive transform for large array responses
+        // (paginated leads lists). Frontend handles snake_case from these endpoints.
+        const isLargeArray = Array.isArray(body.data) && body.data.length > 10;
+        if (!isLargeArray) {
+          body.data = mapIdToUnderscoreId(body.data);
+        }
       } else {
         body = mapIdToUnderscoreId(body);
       }
